@@ -776,9 +776,10 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        component_contains_glob, derive_glob_walk_root, edit_file, expand_braces, glob_search,
-        grep_search, is_symlink_escape, read_file, read_file_in_workspace, write_file,
-        write_file_in_workspace, GrepSearchInput, MAX_WRITE_SIZE,
+        component_contains_glob, derive_glob_walk_root, edit_file, edit_file_in_workspace,
+        expand_braces, glob_search, grep_search, is_symlink_escape, read_file,
+        read_file_in_workspace, write_file, write_file_in_workspace, GrepSearchInput,
+        MAX_WRITE_SIZE,
     };
 
     fn temp_path(name: &str) -> std::path::PathBuf {
@@ -856,6 +857,41 @@ mod tests {
         let error = result.unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
         assert!(error.to_string().contains("escapes workspace"));
+    }
+
+    #[test]
+    fn edit_in_workspace_touches_only_target_file() {
+        let workspace = temp_path("edit-isolation");
+        std::fs::create_dir_all(&workspace).expect("workspace dir should be created");
+        let target = workspace.join("aria.json");
+        let sibling = workspace.join("bram.json");
+        let sibling_contents = r#"{"name":"Bram","personality":"gruff"}"#;
+        write_file(
+            target.to_string_lossy().as_ref(),
+            r#"{"name":"Aria","personality":"warm"}"#,
+        )
+        .expect("write target should succeed");
+        write_file(sibling.to_string_lossy().as_ref(), sibling_contents)
+            .expect("write sibling should succeed");
+
+        edit_file_in_workspace(
+            target.to_string_lossy().as_ref(),
+            "warm",
+            "warm and witty",
+            false,
+            &workspace,
+        )
+        .expect("edit within workspace should succeed");
+
+        assert!(std::fs::read_to_string(&target)
+            .unwrap()
+            .contains("warm and witty"));
+        // The unrelated card must be byte-identical.
+        assert_eq!(
+            std::fs::read_to_string(&sibling).unwrap(),
+            sibling_contents,
+            "editing one card must not touch another"
+        );
     }
 
     #[test]

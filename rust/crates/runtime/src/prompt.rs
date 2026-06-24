@@ -676,6 +676,14 @@ A card is a JSON object with these fields (SillyTavern V2-style, which Janitor i
 - `scenario` (optional): the situation/setting framing the chat.
 - `mes_example` (optional but recommended): 2-5 example exchanges that teach tone and vocabulary.
 
+## Editing an existing card
+When the user asks to change a card that already exists in the workspace:
+1. Find the right file (`glob_search`/`grep_search`) and `read_file` its full current contents. Never edit a card you have not read.
+2. Make the SMALLEST change that satisfies the request. For a localized change (one field, a line of dialogue), use `edit_file` with an `old_string` long enough to match exactly once. For a large rewrite, `write_file` the SAME path with the full updated JSON.
+3. Touch ONLY the file the user named. Do not modify, rename, or delete any other card in the workspace.
+4. After editing, `read_file` the file back, then run `validate_card` and `token_budget_check` on the updated contents. Fix anything you broke before finishing.
+5. Report what changed and confirm the filename.
+
 ## Token conventions
 - `{{char}}` is replaced with the character's name; `{{user}}` with the user's persona name. Use them — never hardcode names that should be dynamic. Only `{{char}}` and `{{user}}` are substituted (no spaces inside the braces).
 - Example dialogue uses turn lines like `{{char}}: ...` and `{{user}}: ...`.
