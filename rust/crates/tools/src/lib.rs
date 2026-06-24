@@ -16,11 +16,12 @@ use plugins::PluginTool;
 use reqwest::blocking::Client;
 use runtime::{
     check_freshness, dedupe_superseded_commit_events, edit_file_in_workspace, execute_bash,
-    glob_search_in_workspace, grep_search_in_workspace, load_system_prompt,
+    glob_search, glob_search_in_workspace, grep_search, grep_search_in_workspace,
+    load_system_prompt,
     lsp_client::LspRegistry,
     mcp_tool_bridge::McpToolRegistry,
     permission_enforcer::{EnforcementResult, PermissionEnforcer},
-    read_file_in_workspace,
+    read_file, read_file_in_workspace,
     summary_compression::compress_summary_text,
     task_registry::TaskRegistry,
     team_cron_registry::{CronRegistry, TeamRegistry},
@@ -36,6 +37,25 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 pub mod card_tools;
+
+/// Process-global read-scope switch. When enabled, the read/list/grep tools are
+/// no longer jailed to the current workspace, so the agent may pull style
+/// references from card files anywhere the user points it. Writes/edits remain
+/// jailed to the workspace regardless. `claw-janitor` enables this at startup;
+/// `claw` leaves it off, preserving its workspace-only read posture.
+static READS_UNRESTRICTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Allow the read/list/grep tools to range outside the workspace. Call once at
+/// binary startup (see `claw-janitor`). Writes stay workspace-scoped.
+pub fn allow_unrestricted_reads() {
+    READS_UNRESTRICTED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[must_use]
+fn reads_unrestricted() -> bool {
+    READS_UNRESTRICTED.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Global task registry shared across tool invocations within a session.
 fn global_lsp_registry() -> &'static LspRegistry {
@@ -2516,6 +2536,11 @@ fn branch_divergence_output(
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_read_file(input: ReadFileInput) -> Result<String, String> {
+    if reads_unrestricted() {
+        return to_pretty_json(
+            read_file(&input.path, input.offset, input.limit).map_err(io_to_string)?,
+        );
+    }
     let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
     to_pretty_json(
         read_file_in_workspace(&input.path, input.offset, input.limit, &workspace)
@@ -2548,6 +2573,11 @@ fn run_edit_file(input: EditFileInput) -> Result<String, String> {
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_glob_search(input: GlobSearchInputValue) -> Result<String, String> {
+    if reads_unrestricted() {
+        return to_pretty_json(
+            glob_search(&input.pattern, input.path.as_deref()).map_err(io_to_string)?,
+        );
+    }
     let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
     to_pretty_json(
         glob_search_in_workspace(&input.pattern, input.path.as_deref(), &workspace)
@@ -2557,6 +2587,9 @@ fn run_glob_search(input: GlobSearchInputValue) -> Result<String, String> {
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_grep_search(input: GrepSearchInput) -> Result<String, String> {
+    if reads_unrestricted() {
+        return to_pretty_json(grep_search(&input).map_err(io_to_string)?);
+    }
     let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
     to_pretty_json(grep_search_in_workspace(&input, &workspace).map_err(io_to_string)?)
 }

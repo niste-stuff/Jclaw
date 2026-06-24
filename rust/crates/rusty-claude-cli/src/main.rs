@@ -329,6 +329,11 @@ type RuntimePluginStateBuildOutput = (
 );
 
 fn main() {
+    // claw-janitor may read card files anywhere the user points it for style
+    // reference; writes/edits stay workspace-scoped. `claw` leaves reads jailed.
+    if janitor_mode() {
+        tools::allow_unrestricted_reads();
+    }
     if let Err(error) = run() {
         let message = error.to_string();
         // When --output-format json is active, emit errors as JSON so downstream
@@ -7632,13 +7637,21 @@ impl LiveCli {
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // claw-janitor authors character cards, not code. When the user has not
-        // pinned an explicit tool set, restrict the agent to the card-authoring
-        // tools so the codebase tools (bash/read/write/edit/glob/grep) are
-        // disabled via the allowed-tools surface rather than removed.
+        // claw-janitor authors character cards as files in the workspace. When
+        // the user has not pinned an explicit tool set, enable the file
+        // read/list/grep and write/edit tools plus the card tools. `bash` stays
+        // OUT (and is also denied by the WorkspaceWrite permission mode): card
+        // authoring needs no shell, and keeping it off limits blast radius.
+        // Writes/edits remain jailed to the workspace by the runtime's file-op
+        // boundary; reads may range outside it (see allow_unrestricted_reads).
         let allowed_tools = match allowed_tools {
             Some(set) => Some(set),
             None if janitor_mode() => normalize_allowed_tools(&[
+                "read_file".to_string(),
+                "glob_search".to_string(),
+                "grep_search".to_string(),
+                "write_file".to_string(),
+                "edit_file".to_string(),
                 "validate_card".to_string(),
                 "token_budget_check".to_string(),
             ])
