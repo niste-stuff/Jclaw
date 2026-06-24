@@ -124,3 +124,85 @@ SillyTavern V2-style JSON object that Janitor imports/exports:
   editing the shared hardcoded intro string.
 - **Loop is agent-driven** (system-prompt instructed self-critique), and the
   canonical output format is **JSON (SillyTavern V2-style)**.
+
+---
+
+# Phase 2 — workspace of card files
+
+Phase 2 turns `claw-janitor` into "Claude Code, but the repo is a folder of
+Janitor cards": the user `cd`s into a card workspace and the agent reads,
+references, drafts, saves, and edits cards as files.
+
+## Source-assumption audit (required before wiring)
+
+1. **Is a file treated as source code?** No blocking assumptions on the
+   card-editing path:
+   - `edit_file` (`runtime/file_ops.rs:268`) is a plain `old_string → new_string`
+     text replace with a line-based patch — language-agnostic, fine on `.json`.
+   - Tool-result rendering (`format_structured_patch_preview`, `main.rs`) is a
+     line diff; syntax highlighting (`render.rs:569`) keys off the fenced
+     code-block token and falls back to plain text for unknown languages. JSON
+     has a syntect syntax; worst case is plain text. No choke.
+   - The only code-oriented features — `claw diff` (runs `git diff`) and
+     `claw init` (language detection) — are separate subcommands not on the
+     card read/edit/save path.
+2. **How writes are scoped, and where the boundary is set.** The live CLI
+   enforces with two gates; the per-path `classify_*_permission` functions are
+   **dormant** (the registry enforcer is never set):
+   - *Per-tool mode gate*: `PermissionPolicy(active_mode)` + static per-tool
+     `required_permission`, authorized in `conversation.rs:450/457` before
+     `tool_executor.execute`. Default `active_mode` is **WorkspaceWrite**
+     (`main.rs:3073`), which allows reads + writes and denies `bash`
+     (needs DangerFullAccess).
+   - *FS boundary*: `run_write_file`/`run_edit_file` call the `*_in_workspace`
+     variants with `workspace_root = current_dir()` (`tools/lib.rs`), enforced
+     by `validate_workspace_boundary` (`file_ops.rs:42`), rejecting out-of-cwd
+     paths and symlink escapes. **This is where the write boundary lives — the
+     workspace is the folder `jclaw` is launched from.** We configured the
+     existing guardrail; we did not add a new one.
+3. **Buildable-project assumptions?** None. Sessions are generic JSONL
+   (`session.rs`), `workspace_root` is optional, and the agent loop never builds.
+   Build-aware features are opt-in flags/subcommands, not the default turn.
+
+## Read scope ≠ write scope (the one real change)
+
+Reads were also FS-jailed to cwd. To allow read-anywhere while keeping writes
+scoped, we added a **process-global read toggle** in the `tools` crate
+(`allow_unrestricted_reads()`), which `claw-janitor` flips at startup (`main.rs`).
+When set, `run_read_file`/`run_glob_search`/`run_grep_search` use the unjailed
+file-op variants; **writes/edits are unchanged and stay cwd-jailed.** `claw`
+never flips it, so its workspace-only read posture is preserved. (Chosen over an
+env var or threading a read-root through the context-free `execute_tool` — least
+churn, explicit, testable.)
+
+## Tool surface (phase 2)
+
+`claw-janitor` default allowed-tools: `read_file`, `glob_search`, `grep_search`,
+`write_file`, `edit_file`, `validate_card`, `token_budget_check`. **`bash` stays
+excluded** and is independently denied by WorkspaceWrite mode (defense in depth).
+
+## Enforcement proof (DoD)
+
+- `tools::tests::file_tools_reject_paths_outside_current_workspace` — existing
+  test; an out-of-workspace **write** is refused with "escapes workspace".
+- `tools::tests::reads_range_outside_workspace_when_unrestricted_but_writes_do_not`
+  — after `allow_unrestricted_reads()`, an out-of-workspace **read** succeeds
+  while an out-of-workspace **write** is still refused.
+- `runtime::file_ops::tests::edit_in_workspace_touches_only_target_file` —
+  editing one card leaves sibling cards byte-identical.
+
+## Not verifiable without an API key
+
+The live save / reference / edit / clarify loop needs `ANTHROPIC_API_KEY`. To
+verify manually:
+```
+mkdir /tmp/cards && cd /tmp/cards
+ANTHROPIC_API_KEY=... <repo>/rust/target/debug/claw-janitor "a shy bookshop owner"
+ls /tmp/cards          # expect a <slug>.json saved here
+# reference: point it at another folder of cards and ask it to match a style;
+#   it should cite the file(s) it read.
+# edit: ask it to change one saved card; confirm only that file changed.
+# clarify: give a vague prompt ("make a card") and confirm it asks first.
+```
+A write outside the workspace can be confirmed denied by asking it to save to an
+absolute path like `/tmp/outside.json` — the file-op boundary refuses it.

@@ -57,6 +57,11 @@ fn reads_unrestricted() -> bool {
     READS_UNRESTRICTED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+#[cfg(test)]
+pub(crate) fn reset_unrestricted_reads() {
+    READS_UNRESTRICTED.store(false, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Global task registry shared across tool invocations within a session.
 fn global_lsp_registry() -> &'static LspRegistry {
     use std::sync::OnceLock;
@@ -10071,6 +10076,43 @@ mod tests {
     }
 
     #[test]
+    fn reads_range_outside_workspace_when_unrestricted_but_writes_do_not() {
+        let _guard = env_guard();
+        let root = temp_path("read-scope-root");
+        let outside = temp_path("read-scope-outside");
+        fs::create_dir_all(&root).expect("create root");
+        fs::create_dir_all(&outside).expect("create outside");
+        fs::write(outside.join("reference.json"), "{\"ref\":true}\n").expect("outside fixture");
+        let original_dir = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("set cwd");
+
+        // claw-janitor enables this at startup; restore before releasing the
+        // lock so the default-jailed tests are unaffected by ordering.
+        super::allow_unrestricted_reads();
+
+        let read_ok = execute_tool(
+            "read_file",
+            &json!({ "path": outside.join("reference.json").display().to_string() }),
+        )
+        .expect("read outside workspace should succeed when unrestricted");
+        assert!(read_ok.contains("ref"), "read output should include file contents: {read_ok}");
+
+        // Writes stay workspace-jailed regardless of the read toggle.
+        let write_error = execute_tool(
+            "write_file",
+            &json!({ "path": outside.join("created.txt").display().to_string(), "content": "nope" }),
+        )
+        .expect_err("write outside workspace must still fail");
+        assert!(write_error.contains("escapes workspace"));
+        assert!(!outside.join("created.txt").exists());
+
+        super::reset_unrestricted_reads();
+        std::env::set_current_dir(&original_dir).expect("restore cwd");
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
     #[cfg(unix)]
     fn file_tools_reject_symlink_escape_from_current_workspace() {
         let _guard = env_lock()
@@ -10989,82 +11031,5 @@ printf 'pwsh:%s' "$1"
             )
             .into_bytes()
         }
-    }
-}
-
-#[cfg(test)]
-mod scope_tests {
-    use super::{allow_unrestricted_reads, execute_tool};
-    use std::sync::Mutex;
-
-    // Serialize tests that touch the process-global read-scope flag.
-    static SCOPE_LOCK: Mutex<()> = Mutex::new(());
-
-    fn unique_outside_path(label: &str) -> std::path::PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "jclaw-scope-{label}-{}-{nanos}.txt",
-            std::process::id()
-        ))
-    }
-
-    // DoD: a write OUTSIDE the workspace is refused by the runtime's file-op
-    // boundary, independent of the read-scope toggle.
-    #[test]
-    fn write_outside_workspace_is_refused() {
-        let _guard = SCOPE_LOCK.lock().unwrap();
-        let outside = unique_outside_path("write");
-        let cwd = std::env::current_dir().unwrap();
-        assert!(
-            !outside.starts_with(&cwd),
-            "test setup: target must be outside the workspace"
-        );
-
-        let result = execute_tool(
-            "write_file",
-            &serde_json::json!({ "path": outside.to_string_lossy(), "content": "nope" }),
-        );
-        assert!(result.is_err(), "out-of-workspace write must be refused");
-        assert!(
-            result.unwrap_err().contains("escapes workspace"),
-            "denial reason should name the workspace boundary"
-        );
-        assert!(
-            !outside.exists(),
-            "no file may be created outside the workspace"
-        );
-    }
-
-    // Reads are workspace-jailed by default and only range wider after the
-    // process-global toggle is enabled (claw-janitor flips it; claw does not).
-    #[test]
-    fn reads_jailed_until_toggle_then_unrestricted() {
-        let _guard = SCOPE_LOCK.lock().unwrap();
-        let outside = unique_outside_path("read");
-        std::fs::write(&outside, "reference content").unwrap();
-
-        // Off (default): out-of-workspace read refused. Only this test mutates
-        // the global, and it asserts the OFF behavior before enabling, so the
-        // ordering is deterministic.
-        let jailed =
-            execute_tool("read_file", &serde_json::json!({ "path": outside.to_string_lossy() }));
-        assert!(
-            jailed.is_err() && jailed.as_ref().unwrap_err().contains("escapes workspace"),
-            "read outside workspace must be refused before toggle: {jailed:?}"
-        );
-
-        // On: same read succeeds.
-        allow_unrestricted_reads();
-        let allowed =
-            execute_tool("read_file", &serde_json::json!({ "path": outside.to_string_lossy() }));
-        assert!(
-            allowed.is_ok() && allowed.as_ref().unwrap().contains("reference content"),
-            "read outside workspace must succeed after toggle: {allowed:?}"
-        );
-
-        let _ = std::fs::remove_file(&outside);
     }
 }
