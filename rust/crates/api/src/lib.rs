@@ -1,3 +1,11 @@
+// This vendored provider crate returns `Result<_, ApiError>` widely, and
+// `ApiError` is an information-rich enum (a few large variants). Clippy's
+// `result_large_err` would otherwise fire ~37 times here under `-D warnings`
+// (the gate documented in CLAUDE.md). Boxing every signature would churn the
+// pinned upstream client for a micro-perf lint with no correctness impact, so
+// we allow it crate-wide instead. Re-evaluate if `ApiError` grows further.
+#![allow(clippy::result_large_err)]
+
 mod client;
 mod error;
 mod http_client;

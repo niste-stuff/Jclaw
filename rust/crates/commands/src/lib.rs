@@ -124,7 +124,7 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         name: "config",
         aliases: &[],
-        summary: "Inspect Claude config files or merged sections",
+        summary: "Inspect Jclaw config files or merged sections",
         argument_hint: Some("[env|hooks|model|plugins]"),
         resume_supported: true,
     },
@@ -138,7 +138,7 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         name: "memory",
         aliases: &[],
-        summary: "Inspect loaded Claude instruction memory files",
+        summary: "Inspect loaded Jclaw instruction memory files",
         argument_hint: None,
         resume_supported: true,
     },
@@ -231,7 +231,7 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         name: "plugin",
         aliases: &["plugins", "marketplace"],
-        summary: "Manage Claw Code plugins",
+        summary: "Manage Jclaw plugins",
         argument_hint: Some(
             "[list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]",
         ),
@@ -380,8 +380,8 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         name: "effort",
         aliases: &[],
-        summary: "Set the effort level for responses",
-        argument_hint: Some("[low|medium|high]"),
+        summary: "Set the reasoning effort level for upcoming turns",
+        argument_hint: Some("[none|low|medium|high|xhigh|max]"),
         resume_supported: true,
     },
     SlashCommandSpec {
@@ -722,8 +722,8 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         name: "setup",
-        aliases: &[],
-        summary: "Run the interactive provider setup wizard",
+        aliases: &["api"],
+        summary: "Configure API provider, key, model, and base URL",
         argument_hint: None,
         resume_supported: false,
     },
@@ -1401,7 +1401,7 @@ pub fn validate_slash_command_input(
             validate_no_args(command, &args)?;
             SlashCommand::Doctor
         }
-        "setup" => {
+        "setup" | "api" => {
             validate_no_args(command, &args)?;
             SlashCommand::Setup
         }
@@ -6073,7 +6073,7 @@ mod tests {
 
         // then
         assert!(help.contains("/plugin"));
-        assert!(help.contains("Summary          Manage Claw Code plugins"));
+        assert!(help.contains("Summary          Manage Jclaw plugins"));
         assert!(help.contains("Aliases          /plugins, /marketplace"));
         assert!(help.contains("Category         Tools"));
     }

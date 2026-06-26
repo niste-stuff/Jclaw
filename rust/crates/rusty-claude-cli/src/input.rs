@@ -10,8 +10,11 @@ use rustyline::hint::Hinter;
 use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{
-    Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyCode, KeyEvent, Modifiers,
+    Cmd, CompletionType, ConditionalEventHandler, Config, Context, EditMode, Editor, Event,
+    EventContext, EventHandler, Helper, KeyCode, KeyEvent, Modifiers, RepeatCount,
 };
+
+use commands::slash_command_specs;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadOutcome {
@@ -65,12 +68,19 @@ impl Completer for SlashCommandHelper {
             return Ok((0, Vec::new()));
         };
 
+        // When the prefix is empty or just "/", the user has only opened the
+        // menu (e.g. by typing "/") and hasn't picked a command yet — show the
+        // clean top-level command list, not every "/cmd arg" expansion.
+        let top_level_only = prefix.trim_start_matches('/').is_empty();
+        let width = menu_width();
+
         let matches = self
             .completions
             .iter()
             .filter(|candidate| candidate.starts_with(prefix))
+            .filter(|candidate| !top_level_only || is_top_level_command(candidate))
             .map(|candidate| Pair {
-                display: candidate.clone(),
+                display: format_menu_entry(candidate, width),
                 replacement: candidate.clone(),
             })
             .collect();
@@ -115,6 +125,13 @@ impl LineEditor {
         editor.set_helper(Some(SlashCommandHelper::new(completions)));
         editor.bind_sequence(KeyEvent(KeyCode::Char('J'), Modifiers::CTRL), Cmd::Newline);
         editor.bind_sequence(KeyEvent(KeyCode::Enter, Modifiers::SHIFT), Cmd::Newline);
+        // Typing "/" on an empty line pops the slash-command menu immediately
+        // (rustyline completes the common "/" prefix and lists the commands),
+        // mirroring the live command picker. Mid-line "/" inserts normally.
+        editor.bind_sequence(
+            KeyEvent(KeyCode::Char('/'), Modifiers::NONE),
+            EventHandler::Conditional(Box::new(SlashMenuTrigger)),
+        );
 
         Self {
             prompt: prompt.into(),
@@ -203,11 +220,90 @@ fn slash_command_prefix(line: &str, pos: usize) -> Option<&str> {
     }
 
     let prefix = &line[..pos];
+    // An empty line is treated as the start of a slash command so the "/"
+    // trigger (and Tab on an empty prompt) can list every command.
+    if prefix.is_empty() {
+        return Some("");
+    }
     if !prefix.starts_with('/') {
         return None;
     }
 
     Some(prefix)
+}
+
+/// A candidate is "top level" when it is a bare command with no argument, e.g.
+/// `/model` but not `/model opus`.
+fn is_top_level_command(candidate: &str) -> bool {
+    !candidate
+        .trim_start_matches('/')
+        .contains(char::is_whitespace)
+}
+
+/// One-line description for a candidate, looked up from the command spec table
+/// by the candidate's leading command name (ignoring any arguments).
+fn candidate_description(candidate: &str) -> &'static str {
+    let name = candidate
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()
+        .unwrap_or("");
+    if name.is_empty() {
+        return "";
+    }
+    slash_command_specs()
+        .iter()
+        .find(|spec| spec.name == name || spec.aliases.contains(&name))
+        .map_or("", |spec| spec.summary)
+}
+
+fn menu_width() -> usize {
+    crossterm::terminal::size()
+        .map(|(cols, _)| cols as usize)
+        .unwrap_or(80)
+        .clamp(40, 120)
+}
+
+/// Render a menu row as `"/command            description"`, padding the command
+/// into a fixed left column and truncating the description to fit the terminal.
+fn format_menu_entry(candidate: &str, width: usize) -> String {
+    const COMMAND_COLUMN: usize = 22;
+    let description = candidate_description(candidate);
+    if description.is_empty() {
+        return candidate.to_string();
+    }
+    let available = width.saturating_sub(COMMAND_COLUMN + 2).max(12);
+    let description = truncate_with_ellipsis(description, available);
+    format!("{candidate:<COMMAND_COLUMN$}  {description}")
+}
+
+fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// Opens the slash-command menu when "/" is pressed at the start of an empty
+/// line; otherwise lets "/" insert normally.
+struct SlashMenuTrigger;
+
+impl ConditionalEventHandler for SlashMenuTrigger {
+    fn handle(
+        &self,
+        _evt: &Event,
+        _n: RepeatCount,
+        _positive: bool,
+        ctx: &EventContext,
+    ) -> Option<Cmd> {
+        if ctx.line().is_empty() {
+            Some(Cmd::Complete)
+        } else {
+            None
+        }
+    }
 }
 
 fn normalize_completions(completions: Vec<String>) -> Vec<String> {
@@ -221,7 +317,10 @@ fn normalize_completions(completions: Vec<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{slash_command_prefix, LineEditor, SlashCommandHelper};
+    use super::{
+        candidate_description, format_menu_entry, is_top_level_command, slash_command_prefix,
+        LineEditor, SlashCommandHelper,
+    };
     use rustyline::completion::Completer;
     use rustyline::highlight::Highlighter;
     use rustyline::history::{DefaultHistory, History};
@@ -237,6 +336,55 @@ mod tests {
         );
         assert_eq!(slash_command_prefix("hello", 5), None);
         assert_eq!(slash_command_prefix("/help", 2), None);
+    }
+
+    #[test]
+    fn empty_line_prefix_opens_the_command_menu() {
+        assert_eq!(slash_command_prefix("", 0), Some(""));
+    }
+
+    #[test]
+    fn empty_prefix_lists_only_top_level_commands() {
+        let helper = SlashCommandHelper::new(vec![
+            "/model".to_string(),
+            "/model opus".to_string(),
+            "/help".to_string(),
+        ]);
+        let history = DefaultHistory::new();
+        let ctx = Context::new(&history);
+        let (start, matches) = helper
+            .complete("", 0, &ctx)
+            .expect("completion should work");
+
+        assert_eq!(start, 0);
+        let replacements: Vec<_> = matches.into_iter().map(|c| c.replacement).collect();
+        assert!(replacements.contains(&"/model".to_string()));
+        assert!(replacements.contains(&"/help".to_string()));
+        assert!(!replacements.contains(&"/model opus".to_string()));
+    }
+
+    #[test]
+    fn menu_entry_shows_command_description() {
+        // `/help` has a known spec summary, so the rendered display row should
+        // contain both the command and its description.
+        let entry = format_menu_entry("/help", 80);
+        assert!(entry.starts_with("/help"));
+        assert!(entry.contains(candidate_description("/help")));
+        assert!(!candidate_description("/help").is_empty());
+    }
+
+    #[test]
+    fn argument_candidate_description_falls_back_to_command() {
+        assert_eq!(
+            candidate_description("/model opus"),
+            candidate_description("/model")
+        );
+    }
+
+    #[test]
+    fn top_level_command_detection() {
+        assert!(is_top_level_command("/model"));
+        assert!(!is_top_level_command("/model opus"));
     }
 
     #[test]

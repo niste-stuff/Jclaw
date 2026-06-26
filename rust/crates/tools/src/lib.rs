@@ -10076,6 +10076,29 @@ mod tests {
     }
 
     #[test]
+    fn default_surface_offers_full_toolset_plus_card_tools() {
+        // claw-janitor runs the unrestricted (`None`) tool surface, so it must
+        // expose BOTH the full coding-agent tools (bash, edit_file, grep) and
+        // the card-authoring tools — they coexist in the default spec list.
+        let names: Vec<&str> = mvp_tool_specs().iter().map(|spec| spec.name).collect();
+        for tool in [
+            "bash",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "glob_search",
+            "grep_search",
+            "validate_card",
+            "token_budget_check",
+        ] {
+            assert!(
+                names.contains(&tool),
+                "default surface should offer `{tool}`"
+            );
+        }
+    }
+
+    #[test]
     fn reads_range_outside_workspace_when_unrestricted_but_writes_do_not() {
         let _guard = env_guard();
         let root = temp_path("read-scope-root");
@@ -10095,7 +10118,10 @@ mod tests {
             &json!({ "path": outside.join("reference.json").display().to_string() }),
         )
         .expect("read outside workspace should succeed when unrestricted");
-        assert!(read_ok.contains("ref"), "read output should include file contents: {read_ok}");
+        assert!(
+            read_ok.contains("ref"),
+            "read output should include file contents: {read_ok}"
+        );
 
         // Writes stay workspace-jailed regardless of the read toggle.
         let write_error = execute_tool(

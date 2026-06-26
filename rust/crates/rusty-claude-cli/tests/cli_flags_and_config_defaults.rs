@@ -309,6 +309,12 @@ fn offline_command_in(cwd: &Path, config_home: &Path) -> Command {
         .env_remove("OPENAI_API_KEY")
         .env_remove("XAI_API_KEY")
         .env_remove("DASHSCOPE_API_KEY")
+        // Model env vars also leak from the parent shell (e.g. a Claude Code
+        // session sets ANTHROPIC_MODEL) and make `claw status`/`doctor` reject
+        // the model before reaching the local smoke path.
+        .env_remove("CLAW_MODEL")
+        .env_remove("ANTHROPIC_MODEL")
+        .env_remove("ANTHROPIC_DEFAULT_MODEL")
         .env("ANTHROPIC_BASE_URL", "http://127.0.0.1:9");
     command
 }

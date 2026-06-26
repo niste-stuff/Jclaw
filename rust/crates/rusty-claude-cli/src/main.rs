@@ -1945,9 +1945,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         // Only reject for known top-level subcommands that don't use compact.
         let first = rest[0].as_str();
         if is_known_top_level_subcommand(first) && first != "prompt" {
-            return Err(format!(
-                "invalid_flag_value: --compact is only supported with prompt mode.\nUsage: claw --compact \"<prompt>\" or echo \"<prompt>\" | claw --compact"
-            ));
+            return Err("invalid_flag_value: --compact is only supported with prompt mode.\nUsage: claw --compact \"<prompt>\" or echo \"<prompt>\" | claw --compact".to_string());
         }
     }
 
@@ -3172,8 +3170,113 @@ fn provider_label(kind: ProviderKind) -> &'static str {
 }
 
 fn format_connected_line(model: &str) -> String {
-    let provider = provider_label(detect_provider_kind(model));
+    let provider = connected_provider_label(detect_provider_kind(model));
     format!("Connected: {model} via {provider}")
+}
+
+/// Friendly endpoint name for the "Connected" line. OpenAI-compatible custom
+/// endpoints (OpenRouter, local gateways, etc.) all route through the `openai`
+/// provider, so surface the actual host from `OPENAI_BASE_URL` instead of the
+/// generic `openai` label — e.g. an OpenRouter base URL shows `openrouter`.
+fn connected_provider_label(kind: ProviderKind) -> String {
+    if matches!(kind, ProviderKind::OpenAi) {
+        if let Ok(url) = env::var("OPENAI_BASE_URL") {
+            let url = url.trim();
+            let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+            let authority = after_scheme.split('/').next().unwrap_or("");
+            // Drop any `user:pass@` prefix so embedded credentials never reach
+            // the "Connected:" line.
+            let host = authority
+                .rsplit_once('@')
+                .map(|(_, host)| host)
+                .unwrap_or(authority)
+                .trim_start_matches("www.");
+            if host.contains("openrouter") {
+                return "openrouter".to_string();
+            }
+            if !host.is_empty() && !host.contains("api.openai.com") {
+                return host.to_string();
+            }
+        }
+    }
+    provider_label(kind).to_string()
+}
+
+/// Terminal width for the startup banner's rule/version line, clamped to a
+/// tidy range so it neither overflows narrow terminals nor sprawls on wide ones.
+fn banner_width() -> usize {
+    crossterm::terminal::size()
+        .map(|(cols, _)| cols as usize)
+        .unwrap_or(72)
+        .clamp(46, 100)
+}
+
+/// Shorten an absolute path for display by replacing the `$HOME` prefix with
+/// `~`, e.g. `/Users/westin/Desktop/Jclaw` -> `~/Desktop/Jclaw`.
+fn abbreviate_home_path(path: &str) -> String {
+    if let Ok(home) = env::var("HOME") {
+        if !home.is_empty() {
+            if let Some(rest) = path.strip_prefix(&home) {
+                // Only abbreviate when `home` is the whole path or a full path
+                // component — otherwise `/Users/westin` would also match
+                // `/Users/westin1234`, collapsing the latter to `~/1234`.
+                if rest.is_empty() || rest.starts_with('/') {
+                    let rest = rest.trim_start_matches('/');
+                    return if rest.is_empty() {
+                        "~".to_string()
+                    } else {
+                        format!("~/{rest}")
+                    };
+                }
+            }
+        }
+    }
+    path.to_string()
+}
+
+/// Reasoning-effort tiers in ascending order. `/effort` accepts any of these
+/// (plus `none`), and requests above a model's ceiling are clamped down.
+const EFFORT_LADDER: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
+/// Highest reasoning-effort tier a model is known to accept. The provider
+/// forwards the effort string verbatim, so a tier the model doesn't support
+/// would error — we clamp to this ceiling instead. Defaults to `high` (the
+/// documented max for OpenAI-compatible reasoning models); extend the match
+/// arms when a specific model is confirmed to accept `xhigh`/`max`.
+fn model_max_effort(model: &str) -> &'static str {
+    let m = model.to_lowercase();
+    if m.contains("grok-4") || m.contains("grok4") {
+        "max"
+    } else {
+        "high"
+    }
+}
+
+/// Pick a random session greeting for the startup banner. Seeded from the
+/// current time so each launch rotates through the list.
+fn random_session_tagline() -> &'static str {
+    const TAGLINES: &[&str] = &[
+        "its jai time",
+        "what up gooner?",
+        "you lazy ass mf",
+        "lock in.",
+        "back on the grind",
+        "let's cook",
+        "no thoughts, just cards",
+        "another one",
+    ];
+    // Hash the timestamp rather than using raw nanos: macOS clocks report
+    // microsecond resolution, so subsec_nanos is always a multiple of 1000 —
+    // and 1000 % 8 == 0, which would pin the index to 0 ("its jai time") every
+    // launch. Hashing mixes the high bits down so all taglines can appear.
+    use std::hash::{Hash, Hasher};
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0u128, |d| d.as_nanos());
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    nanos.hash(&mut hasher);
+    let seed = hasher.finish() as usize;
+    TAGLINES[seed % TAGLINES.len()]
 }
 
 fn filter_tool_specs(
@@ -3219,9 +3322,7 @@ fn parse_system_prompt_args(
                 })?;
                 // #99: validate --date is a plausible date string (no newlines, reasonable length)
                 if value.contains('\n') || value.contains('\r') {
-                    return Err(format!(
-                        "invalid_flag_value: --date value contains invalid characters.\nUsage: --date <YYYY-MM-DD>"
-                    ));
+                    return Err("invalid_flag_value: --date value contains invalid characters.\nUsage: --date <YYYY-MM-DD>".to_string());
                 }
                 if value.len() > 20 {
                     return Err(format!(
@@ -3458,11 +3559,7 @@ impl DiagnosticCheck {
 
     fn json_value(&self) -> Value {
         // Derive a stable snake_case id from the check name for machine-readable keying (#704).
-        let id = self
-            .name
-            .to_ascii_lowercase()
-            .replace(' ', "_")
-            .replace('-', "_");
+        let id = self.name.to_ascii_lowercase().replace([' ', '-'], "_");
         let mut value = Map::from_iter([
             ("id".to_string(), Value::String(id.clone())),
             (
@@ -6735,16 +6832,15 @@ fn run_resume_command(
         }
         SlashCommand::Plugins { action, target } => {
             // Only list is supported in resume mode (no runtime to reload)
-            match action.as_deref() {
-                Some(action @ ("install" | "uninstall" | "enable" | "disable" | "update")) => {
-                    // #777: use interactive_only: prefix + \n hint so #776's classify/split
-                    // emits error_kind:interactive_only + non-null hint instead of unknown+null.
-                    // Orchestrators can now detect this and switch to a live REPL instead of retrying.
-                    return Err(format!(
-                        "interactive_only: /plugins {action} requires a live session to reload the plugin runtime.\nStart `claw` and run `/plugins {action}` inside the REPL, or use `claw plugins {action}` as a direct CLI command."
-                    ).into());
-                }
-                _ => {}
+            if let Some(action @ ("install" | "uninstall" | "enable" | "disable" | "update")) =
+                action.as_deref()
+            {
+                // #777: use interactive_only: prefix + \n hint so #776's classify/split
+                // emits error_kind:interactive_only + non-null hint instead of unknown+null.
+                // Orchestrators can now detect this and switch to a live REPL instead of retrying.
+                return Err(format!(
+                    "interactive_only: /plugins {action} requires a live session to reload the plugin runtime.\nStart `claw` and run `/plugins {action}` inside the REPL, or use `claw plugins {action}` as a direct CLI command."
+                ).into());
             }
             let cwd = env::current_dir()?;
             let payload = plugins_command_payload_for(
@@ -7059,6 +7155,10 @@ fn run_repl(
     allow_broad_cwd: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     enforce_broad_cwd_policy(allow_broad_cwd, CliOutputFormat::Text)?;
+    // Detect a usable provider (Anthropic or any OpenAI-compatible endpoint)
+    // before resolving the model; if none is configured, prompt for one. This
+    // also runs before model resolution so a freshly chosen model takes effect.
+    setup_wizard::ensure_provider_configured();
     run_stale_base_preflight(base_commit.as_deref());
     let resolved_model = resolve_repl_model(model)?;
     let mut cli = LiveCli::new(resolved_model, true, allowed_tools, permission_mode)?;
@@ -7637,27 +7737,17 @@ impl LiveCli {
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // claw-janitor authors character cards as files in the workspace. When
-        // the user has not pinned an explicit tool set, enable the file
-        // read/list/grep and write/edit tools plus the card tools. `bash` stays
-        // OUT (and is also denied by the WorkspaceWrite permission mode): card
-        // authoring needs no shell, and keeping it off limits blast radius.
-        // Writes/edits remain jailed to the workspace by the runtime's file-op
-        // boundary; reads may range outside it (see allow_unrestricted_reads).
-        let allowed_tools = match allowed_tools {
-            Some(set) => Some(set),
-            None if janitor_mode() => normalize_allowed_tools(&[
-                "read_file".to_string(),
-                "glob_search".to_string(),
-                "grep_search".to_string(),
-                "write_file".to_string(),
-                "edit_file".to_string(),
-                "validate_card".to_string(),
-                "token_budget_check".to_string(),
-            ])
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
-            None => None,
-        };
+        // claw-janitor runs the SAME full tool surface as `claw` — bash/shell,
+        // file read/write/edit, glob/grep search, web, git, plus the two card
+        // tools (validate_card, token_budget_check) — so it can author cards
+        // alongside the user the way a real coding agent works: searching with
+        // grep/bash, reading references, and editing files in place. The persona
+        // (see JANITOR_STYLE_PROMPT), not a tool whitelist, keeps it on task.
+        // Safety is unchanged: writes/edits stay jailed to the workspace by the
+        // runtime's file-op boundary, bash is still gated by the WorkspaceWrite
+        // permission prompt, and reads may range outside the workspace for
+        // references (see allow_unrestricted_reads in main()). A `--allowed-tools`
+        // flag still pins an explicit set for either binary.
         let system_prompt = build_system_prompt(&model)?;
         let session_state = new_cli_session()?;
         let session = create_managed_session_handle(&session_state.session_id)?;
@@ -7691,45 +7781,95 @@ impl LiveCli {
         }
     }
 
+    /// Handle `/effort [none|low|medium|high|xhigh|max]`. With no argument, show
+    /// the accepted levels; otherwise validate, clamp to the model's ceiling, and
+    /// apply for subsequent turns.
+    fn handle_effort_command(&mut self, level: Option<String>) {
+        let Some(level) = level else {
+            println!("  Usage: /effort <none|low|medium|high|xhigh|max>");
+            return;
+        };
+        let requested = level.trim().to_lowercase();
+        if matches!(requested.as_str(), "none" | "off") {
+            self.set_reasoning_effort(None);
+            println!("  Reasoning effort \x1b[1mdisabled\x1b[0m for upcoming turns.");
+            return;
+        }
+        let Some(req_idx) = EFFORT_LADDER.iter().position(|l| *l == requested) else {
+            eprintln!(
+                "  Unknown effort level '{requested}'. Use: none, low, medium, high, xhigh, or max."
+            );
+            return;
+        };
+        // Clamp above-ceiling requests (xhigh/max) down to the highest tier the
+        // model accepts, so we never send a level the provider would reject.
+        let ceiling = model_max_effort(&self.model);
+        let ceil_idx = EFFORT_LADDER
+            .iter()
+            .position(|l| *l == ceiling)
+            .unwrap_or(EFFORT_LADDER.len() - 1);
+        let applied = EFFORT_LADDER[req_idx.min(ceil_idx)];
+        self.set_reasoning_effort(Some(applied.to_string()));
+        if applied == requested {
+            println!("  Reasoning effort set to \x1b[1m{applied}\x1b[0m for upcoming turns.");
+        } else {
+            println!(
+                "  {} maxes out at \x1b[1m{applied}\x1b[0m reasoning — using that instead of \x1b[1m{requested}\x1b[0m.",
+                self.model
+            );
+        }
+    }
+
     fn startup_banner(&self) -> String {
+        let tagline = random_session_tagline();
         let cwd = env::current_dir().map_or_else(
             |_| "<unknown>".to_string(),
             |path| path.display().to_string(),
-        );
-        let status = status_context(None).ok();
-        let git_branch = status
-            .as_ref()
-            .and_then(|context| context.git_branch.as_deref())
-            .unwrap_or("unknown");
-        let workspace = status.as_ref().map_or_else(
-            || "unknown".to_string(),
-            |context| context.git_summary.headline(),
         );
         let session_path = self.session.path.strip_prefix(Path::new(&cwd)).map_or_else(
             |_| self.session.path.display().to_string(),
             |path| path.display().to_string(),
         );
+        let cwd_display = abbreviate_home_path(&cwd);
+        let width = banner_width();
+        let rule = "─".repeat(width);
+        let version_line = {
+            let label = format!("Jclaw v{VERSION}");
+            format!("{label:>width$}")
+        };
+        // NOTE: built with concat! of per-line literals (not `\`-continuations),
+        // because a string line-continuation strips the leading whitespace of the
+        // next line — which would delete the art's indentation and mangle the `J`.
         format!(
-            "\x1b[38;5;196m\
- ██████╗██╗      █████╗ ██╗    ██╗\n\
-██╔════╝██║     ██╔══██╗██║    ██║\n\
-██║     ██║     ███████║██║ █╗ ██║\n\
-██║     ██║     ██╔══██║██║███╗██║\n\
-╚██████╗███████╗██║  ██║╚███╔███╔╝\n\
- ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝\x1b[0m \x1b[38;5;208mCode\x1b[0m 🦞\n\n\
-  \x1b[2mModel\x1b[0m            {}\n\
-  \x1b[2mPermissions\x1b[0m      {}\n\
-  \x1b[2mBranch\x1b[0m           {}\n\
-  \x1b[2mWorkspace\x1b[0m        {}\n\
-  \x1b[2mDirectory\x1b[0m        {}\n\
-  \x1b[2mSession\x1b[0m          {}\n\
-  \x1b[2mAuto-save\x1b[0m        {}\n\n\
-  Type \x1b[1m/help\x1b[0m for commands · \x1b[1m/status\x1b[0m for live context · \x1b[2m/resume latest\x1b[0m jumps back to the newest session · \x1b[1m/diff\x1b[0m then \x1b[1m/commit\x1b[0m to ship · \x1b[2mTab\x1b[0m for workflow completions · \x1b[2mShift+Enter\x1b[0m for newline",
+            concat!(
+                "\x1b[1;38;5;220m",
+                "     ██╗ ██████╗██╗      █████╗ ██╗    ██╗\n",
+                "     ██║██╔════╝██║     ██╔══██╗██║    ██║\n",
+                "     ██║██║     ██║     ███████║██║ █╗ ██║\n",
+                "\x1b[1;38;5;215m",
+                "██   ██║██║     ██║     ██╔══██║██║███╗██║\n",
+                "╚█████╔╝╚██████╗███████╗██║  ██║╚███╔███╔╝\n",
+                " ╚════╝  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝\x1b[0m 🦞\n",
+                "\x1b[2m{}\x1b[0m\n",
+                "\x1b[38;5;215m{}\x1b[0m\n\n",
+                "  \x1b[1;38;5;220m{}\x1b[0m\n\n",
+                "  \x1b[2mModel\x1b[0m         {}\n",
+                "  \x1b[2mPermissions\x1b[0m   {}\n",
+                "  \x1b[2mDirectory\x1b[0m     {}\n",
+                "  \x1b[2mSession\x1b[0m       {}\n",
+                "  \x1b[2mAuto-save\x1b[0m     {}\n\n",
+                "  \x1b[2mType\x1b[0m \x1b[1m/help\x1b[0m \x1b[2mfor commands ·\x1b[0m ",
+                "\x1b[1m/status\x1b[0m \x1b[2mfor live context ·\x1b[0m ",
+                "\x1b[1m/diff\x1b[0m \x1b[2mthen\x1b[0m \x1b[1m/commit\x1b[0m \x1b[2mto ship ·\x1b[0m ",
+                "\x1b[1mTab\x1b[0m \x1b[2mfor workflow completions ·\x1b[0m ",
+                "\x1b[1mShift+Enter\x1b[0m \x1b[2mfor newline\x1b[0m",
+            ),
+            version_line,
+            rule,
+            tagline,
             self.model,
             self.permission_mode.as_str(),
-            git_branch,
-            workspace,
-            cwd,
+            cwd_display,
             self.session.id,
             session_path,
         )
@@ -7878,8 +8018,7 @@ impl LiveCli {
                     let max_compact_rounds = 4;
                     let preserve_schedule = [4, 2, 1, 0];
 
-                    for round in 0..max_compact_rounds {
-                        let preserve = preserve_schedule[round];
+                    for (round, &preserve) in preserve_schedule.iter().enumerate() {
                         println!(
                             "  Auto-compacting session (round {}/{}, preserving {} recent messages)...",
                             round + 1,
@@ -8137,6 +8276,10 @@ impl LiveCli {
                 false
             }
             SlashCommand::Model { model } => self.set_model(model)?,
+            SlashCommand::Effort { level } => {
+                self.handle_effort_command(level);
+                false
+            }
             SlashCommand::Permissions { mode } => self.set_permissions(mode)?,
             SlashCommand::Clear { confirm } => self.clear_session(confirm)?,
             SlashCommand::Cost => {
@@ -8260,7 +8403,6 @@ impl LiveCli {
             | SlashCommand::Hooks { .. }
             | SlashCommand::Context { .. }
             | SlashCommand::Color { .. }
-            | SlashCommand::Effort { .. }
             | SlashCommand::Branch { .. }
             | SlashCommand::Rewind { .. }
             | SlashCommand::Ide { .. }
@@ -8637,8 +8779,8 @@ impl LiveCli {
         let cwd = env::current_dir()?;
         // #803: reject flag-shaped tokens in list filter for BOTH text and JSON modes.
         // Previously the guard was JSON-only (#793); text mode silently returned empty success.
-        if action.as_deref() == Some("list") {
-            if let Some(filter) = target.as_deref() {
+        if action == Some("list") {
+            if let Some(filter) = target {
                 if filter.starts_with('-') {
                     if matches!(output_format, CliOutputFormat::Json) {
                         // ROADMAP #817: this is a handled local inventory parse error.
@@ -9603,6 +9745,10 @@ fn print_status_snapshot(
     Ok(())
 }
 
+// Vendored status assembler: the wide parameter list mirrors the status report's
+// fields; collapsing them into a struct would churn upstream call sites for no
+// behavior change.
+#[allow(clippy::too_many_arguments)]
 fn status_json_value(
     model: Option<&str>,
     usage: StatusUsage,
@@ -10099,6 +10245,10 @@ fn sandbox_json_value(status: &runtime::SandboxStatus) -> serde_json::Value {
     //        (#731: "not supported on macOS" is a degraded state, not a hard error;
     //         filesystem_active:true means partial containment is working)
     // error = enabled but unsupported AND no filesystem sandbox either (nothing active)
+    // The repeated "ok"/"warn" arms are intentional: each branch documents a
+    // distinct sandbox state (see the comment block above) even where two map to
+    // the same label, so keep them separate rather than collapsing.
+    #[allow(clippy::if_same_then_else)]
     let top_status = if !status.enabled {
         "ok"
     } else if status.active {
@@ -10476,6 +10626,9 @@ fn render_doctor_help_json() -> serde_json::Value {
 }
 
 /// #683-#692: extract structured metadata from help prose
+// The wide tuple is a deliberate, self-documented return shape (each field is
+// commented inline); factoring it into a named type would not improve clarity.
+#[allow(clippy::type_complexity)]
 fn extract_help_metadata(
     topic: LocalHelpTopic,
 ) -> (
@@ -11587,7 +11740,7 @@ fn render_version_report() -> String {
     let branch = GIT_BRANCH.unwrap_or("unknown");
     let dirty = GIT_DIRTY.unwrap_or("unknown");
     format!(
-        "Claw Code\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Branch           {branch}\n  Dirty            {dirty}\n  Target           {target}\n  Build date       {DEFAULT_DATE}"
+        "Jclaw\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Branch           {branch}\n  Dirty            {dirty}\n  Target           {target}\n  Build date       {DEFAULT_DATE}"
     )
 }
 
@@ -13187,7 +13340,6 @@ const STUB_COMMANDS: &[&str] = &[
     "hooks",
     "context",
     "color",
-    "effort",
     "branch",
     "rewind",
     "ide",
@@ -14059,39 +14211,37 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
             let content = message
                 .blocks
                 .iter()
-                .filter_map(|block| match block {
-                    ContentBlock::Text { text } => {
-                        Some(InputContentBlock::Text { text: text.clone() })
-                    }
+                .map(|block| match block {
+                    ContentBlock::Text { text } => InputContentBlock::Text { text: text.clone() },
                     ContentBlock::Thinking {
                         thinking,
                         signature,
                     } => {
                         // 保留 Thinking 块：OpenAI 兼容协议会把它转成 reasoning_content 字段
                         // 回传给 DeepSeek V4（避免 400 "reasoning_content must be passed back" 错误）
-                        Some(InputContentBlock::Thinking {
+                        InputContentBlock::Thinking {
                             thinking: thinking.clone(),
                             signature: signature.clone(),
-                        })
+                        }
                     }
-                    ContentBlock::ToolUse { id, name, input } => Some(InputContentBlock::ToolUse {
+                    ContentBlock::ToolUse { id, name, input } => InputContentBlock::ToolUse {
                         id: id.clone(),
                         name: name.clone(),
                         input: serde_json::from_str(input)
                             .unwrap_or_else(|_| serde_json::json!({ "raw": input })),
-                    }),
+                    },
                     ContentBlock::ToolResult {
                         tool_use_id,
                         output,
                         is_error,
                         ..
-                    } => Some(InputContentBlock::ToolResult {
+                    } => InputContentBlock::ToolResult {
                         tool_use_id: tool_use_id.clone(),
                         content: vec![ToolResultContentBlock::Text {
                             text: output.clone(),
                         }],
                         is_error: *is_error,
-                    }),
+                    },
                 })
                 .collect::<Vec<_>>();
             (!content.is_empty()).then(|| InputMessage {
@@ -17023,7 +17173,7 @@ mod tests {
         for action in ["remove", "uninstall", "delete"] {
             assert_eq!(
                 parse_args(&["skills".to_string(), action.to_string()])
-                    .expect(&format!("skills {action} should parse")),
+                    .unwrap_or_else(|_| panic!("skills {action} should parse")),
                 CliAction::Skills {
                     args: Some(action.to_string()),
                     output_format: CliOutputFormat::Text,
@@ -17363,6 +17513,10 @@ mod tests {
         assert!(help.contains("aliases: /plugins, /marketplace"));
         assert!(help.contains("/agents"));
         assert!(help.contains("/skills"));
+        // Fork commands surface in help: /effort (reasoning tiers) and the
+        // /api alias for the setup wizard.
+        assert!(help.contains("/effort [none|low|medium|high|xhigh|max]"));
+        assert!(help.contains("aliases: /api"));
         assert!(help.contains("/exit"));
         assert!(help.contains(
             "Auto-save            .claw/sessions/<workspace-fingerprint>/<session-id>.jsonl"

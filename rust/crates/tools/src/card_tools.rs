@@ -75,13 +75,19 @@ pub fn validate_card(input: &Value) -> Result<String, String> {
                 ));
             }
         }
-        Some(Value::Array(_)) => errors.push("`tags` is empty; at least one tag is required".to_string()),
+        Some(Value::Array(_)) => {
+            errors.push("`tags` is empty; at least one tag is required".to_string())
+        }
         Some(_) => errors.push("`tags` must be an array of strings".to_string()),
         None => errors.push("required field `tags` is missing (at least one tag)".to_string()),
     }
 
     for field in OPTIONAL_FIELDS {
-        if field_str(&card, field).map(str::trim).unwrap_or("").is_empty() {
+        if field_str(&card, field)
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
             warnings.push(format!("recommended field `{field}` is empty or missing"));
         }
     }
@@ -237,16 +243,26 @@ mod tests {
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["valid"], json!(false));
         let errs = v["errors"].as_array().unwrap();
-        assert!(errs.iter().any(|e| e.as_str().unwrap().contains("personality")));
-        assert!(errs.iter().any(|e| e.as_str().unwrap().contains("first_mes")));
+        assert!(errs
+            .iter()
+            .any(|e| e.as_str().unwrap().contains("personality")));
+        assert!(errs
+            .iter()
+            .any(|e| e.as_str().unwrap().contains("first_mes")));
     }
 
     #[test]
     fn missing_tags_fails() {
-        let out = validate_card(&json!({"card": {"name": "X", "personality": "p", "first_mes": "hi"}})).unwrap();
+        let out =
+            validate_card(&json!({"card": {"name": "X", "personality": "p", "first_mes": "hi"}}))
+                .unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["valid"], json!(false));
-        assert!(v["errors"].as_array().unwrap().iter().any(|e| e.as_str().unwrap().contains("tags")));
+        assert!(v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains("tags")));
     }
 
     #[test]
@@ -256,7 +272,11 @@ mod tests {
         }});
         let out = validate_card(&card).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
-        assert!(v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("persona")));
+        assert!(v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("persona")));
     }
 
     #[test]
@@ -266,7 +286,11 @@ mod tests {
         let out = token_budget_check(&card).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["within_budget"], json!(false));
-        assert!(v["flags"].as_array().unwrap().iter().any(|f| f.as_str().unwrap().contains("hard max")));
+        assert!(v["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f.as_str().unwrap().contains("hard max")));
     }
 
     #[test]

@@ -175,11 +175,14 @@ never flips it, so its workspace-only read posture is preserved. (Chosen over an
 env var or threading a read-root through the context-free `execute_tool` — least
 churn, explicit, testable.)
 
-## Tool surface (phase 2)
+## Tool surface (phase 2) — SUPERSEDED by Phase 3 below
 
 `claw-janitor` default allowed-tools: `read_file`, `glob_search`, `grep_search`,
 `write_file`, `edit_file`, `validate_card`, `token_budget_check`. **`bash` stays
 excluded** and is independently denied by WorkspaceWrite mode (defense in depth).
+
+(Phase 3 removed this whitelist: claw-janitor now runs the full coding-agent
+surface, including `bash`. See "Phase 3" at the bottom of this file.)
 
 ## Enforcement proof (DoD)
 
@@ -206,3 +209,51 @@ ls /tmp/cards          # expect a <slug>.json saved here
 ```
 A write outside the workspace can be confirmed denied by asking it to save to an
 absolute path like `/tmp/outside.json` — the file-op boundary refuses it.
+
+# Phase 3 — full coding-agent surface, authoring alongside the user
+
+Phase 2 kept `claw-janitor` on a 7-tool whitelist (no shell). Phase 3 removes
+the whitelist so the card author behaves like a real coding agent (Claude Code /
+openclaw), only its specialty is cards rather than code.
+
+## Decision: drop the janitor tool whitelist → **full surface, persona-led**
+
+`LiveCli::new` no longer narrows the default tool set for `claw-janitor`. With no
+explicit `--allowed-tools`, it now runs the same `None` (unrestricted) surface as
+`claw`: `bash`, `read_file`, `write_file`, `edit_file`, `glob_search`,
+`grep_search`, web/git/todo tools, **plus** `validate_card` and
+`token_budget_check` (all already present in `mvp_tool_specs()`, so `None`
+includes them). The persona (`JANITOR_STYLE_PROMPT`), not a whitelist, keeps the
+agent on task — same way the `claw` persona keeps a general agent on engineering.
+
+Why: the whitelist made the agent shallow — it could only emit a card, not *work*
+on cards the way an engineer works on a repo (grep across cards, `jq`/`bash` to
+audit JSON, iterate on edits with the user). The user wanted it to author cards
+ALONGSIDE them: propose, edit in place, take feedback, use references, repeat.
+
+## Safety is unchanged (not regressed by adding `bash`)
+
+- **Writes/edits stay workspace-jailed.** `run_write_file`/`run_edit_file` always
+  route through `*_in_workspace`, independent of the read toggle. An absolute
+  out-of-workspace write is still refused with "escapes workspace".
+- **Reads may range outside** for references (`allow_unrestricted_reads()` in
+  `main()`), exactly as in Phase 2.
+- **`bash` is gated, not free.** The default `WorkspaceWrite` permission mode
+  still prompts for shell execution, so the user approves commands — the
+  collaborative posture, not a silent-shell posture.
+
+## Persona rewrite
+
+`JANITOR_STYLE_PROMPT` changed from "you do not run shell / do this, then stop"
+to a collaborator that uses the full toolset (`bash`/`jq`/`git`, grep/glob, web,
+file edits) and works iteratively WITH the user, while keeping the card schema,
+`{{char}}`/`{{user}}` conventions, token budget, and the validate/budget quality
+loop.
+
+## Enforcement proof (DoD, Phase 3)
+
+- `tools::tests::default_surface_offers_full_toolset_plus_card_tools` — the
+  default (`None`) surface exposes both `bash`/`edit_file`/`grep_search` and
+  `validate_card`/`token_budget_check`.
+- The Phase 2 write-jail tests still hold (writes refused outside workspace),
+  proving the wider tool surface did not widen the write boundary.

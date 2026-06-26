@@ -5,11 +5,12 @@
 > pinned at commit `d229a9b022d4845d28a728677e6a6b7c22ec5a2e`. Jclaw reuses
 > claw-code's agent loop, LLM client, session/config, and terminal rendering
 > unchanged, and adds a `claw-janitor` binary whose agent authors **Janitor AI
-> character cards** instead of editing code. What we changed: a Janitor
-> system-prompt persona (`runtime` output style), two card-authoring tools
-> (`validate_card`, `token_budget_check` in the `tools` crate), and an
-> allowed-tools default that disables the codebase tools for `claw-janitor`. The
-> upstream MIT `LICENSE` and copyright are preserved. See `DECISIONS.md` for the
+> character cards** the way `claw` works on code — with the full tool surface
+> (shell, file read/write/edit, grep/glob search, web), plus two card-authoring
+> tools (`validate_card`, `token_budget_check` in the `tools` crate) and a Janitor
+> system-prompt persona (`runtime` output style) that keeps it on task and working
+> alongside you. Writes stay workspace-jailed; reads may range outside for
+> references. The upstream MIT `LICENSE` and copyright are preserved. See `DECISIONS.md` for the
 > pinned SHA, the vendor-vs-dependency decision, and the schema source. The
 > original claw-code README follows.
 
