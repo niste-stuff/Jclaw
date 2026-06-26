@@ -35,11 +35,11 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use log::debug;
 
 use api::{
-    detect_provider_kind, model_family_identity_for, resolve_startup_auth_source, AnthropicClient,
-    AuthSource, ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest,
-    MessageResponse, OutputContentBlock, PromptCache, ProviderClient as ApiProviderClient,
-    ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition,
-    ToolResultContentBlock,
+    detect_provider_kind, model_family_identity_for, model_token_limit,
+    resolve_startup_auth_source, AnthropicClient, AuthSource, ContentBlockDelta, InputContentBlock,
+    InputMessage, MessageRequest, MessageResponse, OutputContentBlock, PromptCache,
+    ProviderClient as ApiProviderClient, ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice,
+    ToolDefinition, ToolResultContentBlock,
 };
 
 use commands::{
@@ -52,7 +52,10 @@ use commands::{
 };
 use init::initialize_repo;
 use plugins::{PluginHooks, PluginManager, PluginManagerConfig, PluginRegistry};
-use render::{MarkdownStreamState, Spinner, TerminalRenderer};
+use render::{
+    context_bar, fmt_compact, fmt_short_duration, titled_rule, MarkdownStreamState, Spinner,
+    TerminalRenderer,
+};
 use runtime::{
     check_base_commit, format_stale_base_warning, format_usd, load_janitor_system_prompt,
     load_janitor_system_prompt_with_context, load_oauth_credentials, load_system_prompt,
@@ -280,6 +283,12 @@ const GIT_COMMIT_TIMESTAMP: Option<&str> = option_env!("GIT_COMMIT_TIMESTAMP");
 const RUSTC_VERSION: Option<&str> = option_env!("RUSTC_VERSION");
 const INTERNAL_PROGRESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(3);
 const POST_TOOL_STALL_TIMEOUT: Duration = Duration::from_secs(10);
+/// How often the stream loop wakes to poll the interrupt flag while waiting on
+/// the next model event, so Ctrl-C feels responsive even mid-generation.
+const INTERRUPT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Pondering face shown while the model is thinking — in the spinner label and
+/// the collapsed thinking-block summary.
+const THINKING_KAOMOJI: &str = "(◔_◔)";
 const PRIMARY_SESSION_EXTENSION: &str = "jsonl";
 const LEGACY_SESSION_EXTENSION: &str = "json";
 const OFFICIAL_REPO_URL: &str = "https://github.com/ultraworkers/claw-code";
@@ -3229,6 +3238,78 @@ fn banner_width() -> usize {
         .clamp(46, 100)
 }
 
+/// Width of the context-usage progress bar in the status line.
+const CONTEXT_BAR_WIDTH: usize = 10;
+
+/// Inputs for the Hermes-style bottom status line. `ctx_used`/`ctx_max` are
+/// `None` when no turn has run yet (rendered as `ctx --`) or the model's context
+/// window is unknown (bar/percent omitted).
+struct StatusBarData {
+    model: String,
+    ctx_used: Option<u32>,
+    ctx_max: Option<u32>,
+    turn_secs: Option<u64>,
+    session_secs: u64,
+}
+
+/// ANSI colour for the context bar, escalating green → yellow → orange → red as
+/// the window fills. Mirrors Hermes' `ctxBarColor` thresholds.
+fn context_bar_color(pct: u8) -> &'static str {
+    if pct >= 95 {
+        "\x1b[31m" // red — critical
+    } else if pct > 80 {
+        "\x1b[38;5;208m" // orange — bad
+    } else if pct >= 50 {
+        "\x1b[33m" // yellow — warn
+    } else {
+        "\x1b[32m" // green — good
+    }
+}
+
+/// Build the single-line Hermes-style status bar:
+/// `model │ ctx 12.3k/200k [████░░░░░░] 6% │ 15m │ ⏱ 0s`.
+/// Segments are joined by a dim ` │ ` and the context bar is colour-coded.
+fn format_status_bar(data: &StatusBarData) -> String {
+    const DIM: &str = "\x1b[2m";
+    const RST: &str = "\x1b[0m";
+    let sep = format!("{DIM} │ {RST}");
+
+    // Model — strip any `provider/` prefix for brevity (e.g. claude-opus-4-8).
+    let model_label = data.model.rsplit('/').next().unwrap_or(&data.model);
+    let mut segments = vec![format!("\x1b[1;38;5;220m{model_label}{RST}")];
+
+    // Context read-out: `ctx --` until the first turn reports usage.
+    let ctx_segment = match data.ctx_used {
+        Some(used) if used > 0 => {
+            if let Some(max) = data.ctx_max.filter(|max| *max > 0) {
+                let pct = ((u64::from(used) * 100) / u64::from(max)).min(100) as u8;
+                let bar_color = context_bar_color(pct);
+                format!(
+                    "{DIM}ctx {RST}{used}/{max} {bar_color}{bar}{RST} {DIM}{pct}%{RST}",
+                    used = fmt_compact(u64::from(used)),
+                    max = fmt_compact(u64::from(max)),
+                    bar = context_bar(pct, CONTEXT_BAR_WIDTH),
+                )
+            } else {
+                format!("{DIM}ctx {RST}{}", fmt_compact(u64::from(used)))
+            }
+        }
+        _ => format!("{DIM}ctx --{RST}"),
+    };
+    segments.push(ctx_segment);
+
+    // Session uptime, then the last turn's wall-clock duration.
+    segments.push(format!(
+        "{DIM}{}{RST}",
+        fmt_short_duration(data.session_secs)
+    ));
+    if let Some(turn_secs) = data.turn_secs {
+        segments.push(format!("{DIM}⏱ {RST}{}", fmt_short_duration(turn_secs)));
+    }
+
+    segments.join(&sep)
+}
+
 /// Render the banner's permission value, flagging risky modes so an unattended
 /// `danger-full-access` (no approval prompts) can't hide in plain gray. Safe
 /// modes render plain; auto-approving modes are colored and annotated.
@@ -3891,7 +3972,7 @@ fn run_doctor(
 
 /// Run the interactive setup wizard to configure provider, API key, and model.
 fn run_setup() -> Result<(), Box<dyn std::error::Error>> {
-    setup_wizard::run_setup_wizard()
+    setup_wizard::run_setup_wizard(false)
 }
 
 /// Starts a minimal Model Context Protocol server that exposes claw's
@@ -7064,7 +7145,7 @@ fn run_resume_command(
         | SlashCommand::OutputStyle { .. }
         | SlashCommand::AddDir { .. }
         | SlashCommand::Team { .. }
-        | SlashCommand::Setup => Err("unsupported resumed slash command".into()),
+        | SlashCommand::Setup { .. } => Err("unsupported resumed slash command".into()),
     }
 }
 
@@ -7206,6 +7287,12 @@ fn run_repl(
 
     loop {
         editor.set_completions(cli.repl_completion_candidates().unwrap_or_default());
+        // Hermes-style input box: a separator, the status line, a separator, then
+        // the prompt. Redrawn each turn so context/usage/uptime stay current.
+        let rule = "─".repeat(banner_width());
+        println!("\x1b[2m{rule}\x1b[0m");
+        println!("{}", cli.status_bar_line());
+        println!("\x1b[2m{rule}\x1b[0m");
         match editor.read_line()? {
             input::ReadOutcome::Submit(input) => {
                 let trimmed = input.trim().to_string();
@@ -7236,12 +7323,18 @@ fn run_repl(
                 if let Some(prompt) = try_resolve_bare_skill_prompt(&cwd, &trimmed) {
                     editor.push_history(input);
                     cli.record_prompt_history(&trimmed);
-                    cli.run_turn(&prompt)?;
+                    let started = Instant::now();
+                    let outcome = cli.run_turn(&prompt);
+                    cli.note_turn_duration(started.elapsed());
+                    outcome?;
                     continue;
                 }
                 editor.push_history(input);
                 cli.record_prompt_history(&trimmed);
-                cli.run_turn(&trimmed)?;
+                let started = Instant::now();
+                let outcome = cli.run_turn(&trimmed);
+                cli.note_turn_duration(started.elapsed());
+                outcome?;
             }
             input::ReadOutcome::Cancel => {}
             input::ReadOutcome::Exit => {
@@ -7281,6 +7374,11 @@ struct LiveCli {
     runtime: BuiltRuntime,
     session: SessionHandle,
     prompt_history: Vec<PromptHistoryEntry>,
+    /// When the REPL session started — drives the status line's uptime clock.
+    session_start: Instant,
+    /// Wall-clock duration of the most recent turn, shown as `⏱` in the status
+    /// line. `None` until the first turn completes.
+    last_turn_duration: Option<Duration>,
 }
 
 #[derive(Debug, Clone)]
@@ -7714,6 +7812,7 @@ fn mcp_annotation_flag(tool: &McpTool, key: &str) -> bool {
 struct HookAbortMonitor {
     stop_tx: Option<Sender<()>>,
     join_handle: Option<JoinHandle<()>>,
+    signal: runtime::HookAbortSignal,
 }
 
 impl HookAbortMonitor {
@@ -7748,12 +7847,19 @@ impl HookAbortMonitor {
         F: FnOnce(Receiver<()>, runtime::HookAbortSignal) + Send + 'static,
     {
         let (stop_tx, stop_rx) = mpsc::channel();
+        let signal = abort_signal.clone();
         let join_handle = thread::spawn(move || wait_for_interrupt(stop_rx, abort_signal));
 
         Self {
             stop_tx: Some(stop_tx),
             join_handle: Some(join_handle),
+            signal,
         }
+    }
+
+    /// True once Ctrl-C (or a hook) has tripped the abort signal for this turn.
+    fn is_aborted(&self) -> bool {
+        self.signal.is_aborted()
     }
 
     fn stop(mut self) {
@@ -7806,6 +7912,8 @@ impl LiveCli {
             runtime,
             session,
             prompt_history: Vec::new(),
+            session_start: Instant::now(),
+            last_turn_duration: None,
         };
         cli.persist_session()?;
         Ok(cli)
@@ -7815,6 +7923,31 @@ impl LiveCli {
         if let Some(rt) = self.runtime.runtime.as_mut() {
             rt.api_client_mut().set_reasoning_effort(effort);
         }
+    }
+
+    /// Record how long the most recent turn took, for the status line's `⏱`.
+    fn note_turn_duration(&mut self, duration: Duration) {
+        self.last_turn_duration = Some(duration);
+    }
+
+    /// Build the Hermes-style status line from the live session state: model,
+    /// context occupancy (last turn's input-side tokens vs. the model's window),
+    /// session uptime, and the last turn's duration.
+    fn status_bar_line(&self) -> String {
+        let turn = self.runtime.usage().current_turn_usage();
+        // Context occupancy is the input side of the last request: fresh prompt
+        // tokens plus whatever was served from / written to the prompt cache.
+        let ctx_used =
+            turn.input_tokens + turn.cache_creation_input_tokens + turn.cache_read_input_tokens;
+        let ctx_max = model_token_limit(&self.model).map(|limit| limit.context_window_tokens);
+
+        format_status_bar(&StatusBarData {
+            model: self.model.clone(),
+            ctx_used: (ctx_used > 0).then_some(ctx_used),
+            ctx_max,
+            turn_secs: self.last_turn_duration.map(|d| d.as_secs()),
+            session_secs: self.session_start.elapsed().as_secs(),
+        })
     }
 
     /// Handle `/effort [none|low|medium|high|xhigh|max]`. With no argument, show
@@ -7868,11 +8001,9 @@ impl LiveCli {
         );
         let cwd_display = abbreviate_home_path(&cwd);
         let width = banner_width();
-        let rule = "─".repeat(width);
-        let version_line = {
-            let label = format!("Jclaw v{VERSION}");
-            format!("{label:>width$}")
-        };
+        // Hermes-style titled rule: a horizontal line with the version label
+        // embedded near the right edge.
+        let title_rule = titled_rule(&format!("Jclaw v{VERSION}"), width);
         // NOTE: built with concat! of per-line literals (not `\`-continuations),
         // because a string line-continuation strips the leading whitespace of the
         // next line — which would delete the art's indentation and mangle the `J`.
@@ -7886,7 +8017,6 @@ impl LiveCli {
                 "██   ██║██║     ██║     ██╔══██║██║███╗██║\n",
                 "╚█████╔╝╚██████╗███████╗██║  ██║╚███╔███╔╝\n",
                 " ╚════╝  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝\x1b[0m 🦞\n",
-                "\x1b[2m{}\x1b[0m\n",
                 "\x1b[38;5;215m{}\x1b[0m\n\n",
                 "  \x1b[1;38;5;220m{}\x1b[0m\n\n",
                 "  \x1b[2mModel\x1b[0m         {}\n",
@@ -7900,8 +8030,7 @@ impl LiveCli {
                 "\x1b[1mTab\x1b[0m \x1b[2mfor workflow completions ·\x1b[0m ",
                 "\x1b[1mShift+Enter\x1b[0m \x1b[2mfor newline\x1b[0m",
             ),
-            version_line,
-            rule,
+            title_rule,
             tagline,
             self.model,
             permission_banner_value(self.permission_mode),
@@ -7927,7 +8056,7 @@ impl LiveCli {
         emit_output: bool,
     ) -> Result<(BuiltRuntime, HookAbortMonitor), Box<dyn std::error::Error>> {
         let hook_abort_signal = runtime::HookAbortSignal::new();
-        let runtime = build_runtime(
+        let mut runtime = build_runtime(
             self.runtime.session().clone(),
             &self.session.id,
             self.model.clone(),
@@ -7939,6 +8068,11 @@ impl LiveCli {
             None,
         )?
         .with_hook_abort_signal(hook_abort_signal.clone());
+        // Share the same signal with the streaming client so Ctrl-C breaks out of
+        // an in-flight model response, not just running hooks.
+        runtime
+            .api_client_mut()
+            .set_interrupt_signal(hook_abort_signal.clone());
         let hook_abort_monitor = HookAbortMonitor::spawn(hook_abort_signal);
 
         Ok((runtime, hook_abort_monitor))
@@ -7954,19 +8088,26 @@ impl LiveCli {
         let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(true)?;
         let mut spinner = Spinner::new();
         let mut stdout = io::stdout();
+        // Hermes-style separator between this exchange and whatever came before.
+        println!("\x1b[2m{}\x1b[0m", "─".repeat(banner_width()));
         spinner.tick(
-            "🦀 Thinking...",
+            &format!("🦀 Thinking {THINKING_KAOMOJI}"),
             TerminalRenderer::new().color_theme(),
             &mut stdout,
         )?;
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
         let result = runtime.run_turn(input, Some(&mut permission_prompter));
+        let interrupted = hook_abort_monitor.is_aborted();
         hook_abort_monitor.stop();
         match result {
             Ok(summary) => {
                 self.replace_runtime(runtime)?;
                 spinner.finish(
-                    "✨ Done",
+                    if interrupted {
+                        "⚠ Interrupted"
+                    } else {
+                        "✨ Done"
+                    },
                     TerminalRenderer::new().color_theme(),
                     &mut stdout,
                 )?;
@@ -8360,9 +8501,6 @@ impl LiveCli {
             SlashCommand::Session { action, target } => {
                 self.handle_session_command(action.as_deref(), target.as_deref())?
             }
-            SlashCommand::Plugins { action, target } => {
-                self.handle_plugins_command(action.as_deref(), target.as_deref())?
-            }
             SlashCommand::Agents { args } => {
                 if let Err(error) = Self::print_agents(args.as_deref(), CliOutputFormat::Text) {
                     eprintln!("{error}");
@@ -8393,9 +8531,9 @@ impl LiveCli {
                 );
                 false
             }
-            SlashCommand::Setup => {
-                if let Err(e) = setup_wizard::run_setup_wizard() {
-                    eprintln!("Setup wizard failed: {e}");
+            SlashCommand::Setup { from_api } => {
+                if let Err(e) = setup_wizard::run_setup_wizard(from_api) {
+                    eprintln!("Setup failed: {e}");
                 }
                 false
             }
@@ -8408,7 +8546,8 @@ impl LiveCli {
                 println!("{}", format_cost_report(usage));
                 false
             }
-            SlashCommand::Login
+            SlashCommand::Plugins { .. }
+            | SlashCommand::Login
             | SlashCommand::Logout
             | SlashCommand::Vim
             | SlashCommand::Upgrade
@@ -9158,37 +9297,6 @@ impl LiveCli {
                 Ok(false)
             }
         }
-    }
-
-    fn handle_plugins_command(
-        &mut self,
-        action: Option<&str>,
-        target: Option<&str>,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
-        let cwd = env::current_dir()?;
-        let payload =
-            plugins_command_payload_for(&cwd, action, target, ConfigWarningMode::EmitStderr)?;
-        println!("{}", payload.message);
-        if payload.reload_runtime {
-            self.reload_runtime_features()?;
-        }
-        Ok(false)
-    }
-
-    fn reload_runtime_features(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let runtime = build_runtime(
-            self.runtime.session().clone(),
-            &self.session.id,
-            self.model.clone(),
-            self.system_prompt.clone(),
-            true,
-            true,
-            self.allowed_tools.clone(),
-            self.permission_mode,
-            None,
-        )?;
-        self.replace_runtime(runtime)?;
-        self.persist_session()
     }
 
     fn compact(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -12809,6 +12917,8 @@ struct AnthropicRuntimeClient {
     tool_registry: GlobalToolRegistry,
     progress_reporter: Option<InternalPromptProgressReporter>,
     reasoning_effort: Option<String>,
+    /// Tripped by Ctrl-C (via `HookAbortMonitor`) to interrupt streaming.
+    interrupt: runtime::HookAbortSignal,
 }
 
 impl AnthropicRuntimeClient {
@@ -12874,11 +12984,16 @@ impl AnthropicRuntimeClient {
             tool_registry,
             progress_reporter,
             reasoning_effort: None,
+            interrupt: runtime::HookAbortSignal::new(),
         })
     }
 
     fn set_reasoning_effort(&mut self, effort: Option<String>) {
         self.reasoning_effort = effort;
+    }
+
+    fn set_interrupt_signal(&mut self, signal: runtime::HookAbortSignal) {
+        self.interrupt = signal;
     }
 }
 
@@ -12975,21 +13090,42 @@ impl AnthropicRuntimeClient {
         let mut received_any_event = false;
 
         loop {
-            let next = if apply_stall_timeout && !received_any_event {
-                match tokio::time::timeout(POST_TOOL_STALL_TIMEOUT, stream.next_event()).await {
-                    Ok(inner) => inner.map_err(|error| {
-                        RuntimeError::new(format_user_visible_api_error(&self.session_id, &error))
-                    })?,
+            // Ctrl-C tripped before we fetch the next event: stop cleanly.
+            if self.interrupt.is_aborted() {
+                return self.finish_interrupted(out, &mut markdown_stream, events);
+            }
+
+            // Fetch the next event, waking every INTERRUPT_POLL_INTERVAL to poll
+            // the interrupt flag so Ctrl-C is responsive mid-stream. next_event()
+            // keeps its buffered state in `self` and only awaits on a cancel-safe
+            // chunk read, so dropping it at a poll boundary loses no data. While
+            // waiting on the very first event of a post-tool continuation we also
+            // enforce the stall timeout so a wedged model can't hang forever.
+            let mut stall_waited = Duration::ZERO;
+            let next = loop {
+                match tokio::time::timeout(INTERRUPT_POLL_INTERVAL, stream.next_event()).await {
+                    Ok(inner) => {
+                        break inner.map_err(|error| {
+                            RuntimeError::new(format_user_visible_api_error(
+                                &self.session_id,
+                                &error,
+                            ))
+                        })?;
+                    }
                     Err(_elapsed) => {
-                        return Err(RuntimeError::new(
-                            "post-tool stall: model did not respond within timeout",
-                        ));
+                        if self.interrupt.is_aborted() {
+                            return self.finish_interrupted(out, &mut markdown_stream, events);
+                        }
+                        if apply_stall_timeout && !received_any_event {
+                            stall_waited += INTERRUPT_POLL_INTERVAL;
+                            if stall_waited >= POST_TOOL_STALL_TIMEOUT {
+                                return Err(RuntimeError::new(
+                                    "post-tool stall: model did not respond within timeout",
+                                ));
+                            }
+                        }
                     }
                 }
-            } else {
-                stream.next_event().await.map_err(|error| {
-                    RuntimeError::new(format_user_visible_api_error(&self.session_id, &error))
-                })?
             };
 
             let Some(event) = next else {
@@ -13133,6 +13269,32 @@ impl AnthropicRuntimeClient {
                 RuntimeError::new(format_user_visible_api_error(&self.session_id, &error))
             })?;
         let mut events = response_to_events(response, out)?;
+        push_prompt_cache_record(&self.client, &mut events);
+        Ok(events)
+    }
+
+    /// Stop a streaming turn early because the user pressed Ctrl-C. Flushes any
+    /// buffered markdown, prints an interrupt notice, and marks the partial
+    /// assistant message complete so the runtime neither continues it nor
+    /// executes a half-streamed tool call.
+    fn finish_interrupted(
+        &self,
+        out: &mut dyn Write,
+        markdown_stream: &mut MarkdownStreamState,
+        mut events: Vec<AssistantEvent>,
+    ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        let renderer = TerminalRenderer::new();
+        if let Some(rendered) = markdown_stream.flush(&renderer) {
+            let _ = write!(out, "{rendered}");
+        }
+        let _ = writeln!(out, "\n\x1b[2m⏹ stopped generating (Ctrl-C)\x1b[0m");
+        let _ = out.flush();
+        if !events
+            .iter()
+            .any(|event| matches!(event, AssistantEvent::MessageStop))
+        {
+            events.push(AssistantEvent::MessageStop);
+        }
         push_prompt_cache_record(&self.client, &mut events);
         Ok(events)
     }
@@ -13372,6 +13534,12 @@ fn collect_prompt_cache_events(summary: &runtime::TurnSummary) -> Vec<serde_json
 /// in this build. Used to filter both REPL completions and help output so the
 /// discovery surface only shows commands that actually work (ROADMAP #39).
 const STUB_COMMANDS: &[&str] = &[
+    // Jclaw fork: the plugin / marketplace system is removed. A private build
+    // has no plugin ecosystem, so these are hidden from the menu, help, and
+    // completions and routed to the not-implemented arm like other stubs.
+    "plugin",
+    "plugins",
+    "marketplace",
     "login",
     "logout",
     "vim",
@@ -14001,15 +14169,15 @@ fn truncate_output_for_display(content: &str, max_lines: usize, max_chars: usize
 
 fn render_thinking_block_summary(
     out: &mut (impl Write + ?Sized),
-    char_count: Option<usize>,
+    token_estimate: Option<usize>,
     redacted: bool,
 ) -> Result<(), RuntimeError> {
     let summary = if redacted {
-        "\n▶ Thinking block hidden by provider\n".to_string()
-    } else if let Some(char_count) = char_count {
-        format!("\n▶ Thinking ({char_count} chars hidden)\n")
+        format!("\n▶ Thinking {THINKING_KAOMOJI} block hidden by provider\n")
+    } else if let Some(tokens) = token_estimate {
+        format!("\n▶ Thinking {THINKING_KAOMOJI} (~{tokens} tokens hidden)\n")
     } else {
-        "\n▶ Thinking hidden\n".to_string()
+        format!("\n▶ Thinking {THINKING_KAOMOJI}\n")
     };
     write!(out, "{summary}")
         .and_then(|()| out.flush())
@@ -14052,7 +14220,9 @@ fn push_output_block(
             thinking,
             signature,
         } => {
-            render_thinking_block_summary(out, Some(thinking.chars().count()), false)?;
+            // Estimate tokens with the repo-wide ~4-bytes-per-token heuristic
+            // (see runtime::compact::estimate_message_tokens).
+            render_thinking_block_summary(out, Some(thinking.len() / 4 + 1), false)?;
             events.push(AssistantEvent::Thinking {
                 thinking,
                 signature,
@@ -14541,25 +14711,26 @@ mod tests {
         format_compact_report, format_connected_line, format_cost_report, format_history_timestamp,
         format_internal_prompt_progress_line, format_issue_report, format_model_report,
         format_model_switch_report, format_permissions_report, format_permissions_switch_report,
-        format_pr_report, format_resume_report, format_status_report, format_tool_call_start,
-        format_tool_result, format_ultraplan_report, format_unknown_slash_command,
-        format_unknown_slash_command_message, format_user_visible_api_error,
-        merge_prompt_with_stdin, normalize_permission_mode, parse_args, parse_export_args,
-        parse_git_status_branch, parse_git_status_metadata_for, parse_git_workspace_summary,
-        parse_history_count, permission_policy, print_help_to, push_output_block,
-        render_config_report, render_diff_report, render_diff_report_for, render_help_topic,
-        render_help_topic_json, render_memory_report, render_prompt_history_report,
-        render_repl_help, render_resume_usage, render_session_list, render_session_markdown,
-        resolve_model_alias, resolve_model_alias_with_config, resolve_repl_model,
-        resolve_session_reference, response_to_events, resume_supported_slash_commands,
-        run_resume_command, short_tool_id, slash_command_completion_candidates_with_sessions,
-        split_error_hint, status_context, status_json_value, summarize_tool_payload_for_markdown,
-        try_resolve_bare_skill_prompt, validate_no_args, write_mcp_server_fixture, CliAction,
-        CliOutputFormat, CliToolExecutor, GitOperation, GitWorkspaceSummary,
-        InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, LocalHelpTopic,
-        PermissionModeProvenance, PromptHistoryEntry, SessionLifecycleKind,
-        SessionLifecycleSummary, SlashCommand, StatusUsage, TmuxPaneSnapshot, DEFAULT_MODEL,
-        LATEST_SESSION_REFERENCE, STUB_COMMANDS,
+        format_pr_report, format_resume_report, format_status_bar, format_status_report,
+        format_tool_call_start, format_tool_result, format_ultraplan_report,
+        format_unknown_slash_command, format_unknown_slash_command_message,
+        format_user_visible_api_error, merge_prompt_with_stdin, normalize_permission_mode,
+        parse_args, parse_export_args, parse_git_status_branch, parse_git_status_metadata_for,
+        parse_git_workspace_summary, parse_history_count, permission_policy, print_help_to,
+        push_output_block, render_config_report, render_diff_report, render_diff_report_for,
+        render_help_topic, render_help_topic_json, render_memory_report,
+        render_prompt_history_report, render_repl_help, render_resume_usage, render_session_list,
+        render_session_markdown, resolve_model_alias, resolve_model_alias_with_config,
+        resolve_repl_model, resolve_session_reference, response_to_events,
+        resume_supported_slash_commands, run_resume_command, short_tool_id,
+        slash_command_completion_candidates_with_sessions, split_error_hint, status_context,
+        status_json_value, summarize_tool_payload_for_markdown, try_resolve_bare_skill_prompt,
+        validate_no_args, write_mcp_server_fixture, CliAction, CliOutputFormat, CliToolExecutor,
+        GitOperation, GitWorkspaceSummary, InternalPromptProgressEvent,
+        InternalPromptProgressState, LiveCli, LocalHelpTopic, PermissionModeProvenance,
+        PromptHistoryEntry, SessionLifecycleKind, SessionLifecycleSummary, SlashCommand,
+        StatusBarData, StatusUsage, TmuxPaneSnapshot, DEFAULT_MODEL, LATEST_SESSION_REFERENCE,
+        STUB_COMMANDS,
     };
     use api::{ApiError, MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -17574,10 +17745,10 @@ mod tests {
         // the trailing bracket so future additions don't re-break this.
         assert!(help
             .contains("/session [list|exists <session-id>|switch <session-id>|fork [branch-name]"));
-        assert!(help.contains(
-            "/plugin [list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]"
-        ));
-        assert!(help.contains("aliases: /plugins, /marketplace"));
+        // Jclaw fork: the plugin / marketplace command is removed and must not
+        // surface in the interactive help.
+        assert!(!help.contains("/plugin "));
+        assert!(!help.contains("aliases: /plugins, /marketplace"));
         assert!(help.contains("/agents"));
         assert!(help.contains("/skills"));
         // Fork commands surface in help: /effort (reasoning tiers) and the
@@ -17606,6 +17777,42 @@ mod tests {
         assert!(completions.contains(&"/resume session-old".to_string()));
         assert!(completions.contains(&"/mcp list".to_string()));
         assert!(completions.contains(&"/ultraplan ".to_string()));
+    }
+
+    #[test]
+    fn status_bar_shows_placeholder_context_before_first_turn() {
+        let line = format_status_bar(&StatusBarData {
+            model: "anthropic/claude-opus-4-8".to_string(),
+            ctx_used: None,
+            ctx_max: Some(200_000),
+            turn_secs: None,
+            session_secs: 5,
+        });
+        let plain = crate::render::strip_ansi(&line);
+        // Provider prefix stripped; no usage yet -> `ctx --`; uptime present.
+        assert!(plain.contains("claude-opus-4-8"));
+        assert!(!plain.contains("anthropic/"));
+        assert!(plain.contains("ctx --"));
+        assert!(plain.contains("5s"));
+        // No turn has completed, so the `⏱` segment is omitted.
+        assert!(!plain.contains('⏱'));
+    }
+
+    #[test]
+    fn status_bar_renders_context_bar_and_turn_clock() {
+        let line = format_status_bar(&StatusBarData {
+            model: "claude-opus-4-8".to_string(),
+            ctx_used: Some(12_000),
+            ctx_max: Some(200_000),
+            turn_secs: Some(83),
+            session_secs: 900,
+        });
+        let plain = crate::render::strip_ansi(&line);
+        assert!(plain.contains("ctx 12k/200k"));
+        assert!(plain.contains('█'));
+        assert!(plain.contains("6%"));
+        assert!(plain.contains("15m 0s")); // session uptime
+        assert!(plain.contains("⏱ 1m 23s")); // last turn
     }
 
     #[test]
@@ -19407,7 +19614,8 @@ UU conflicted.rs",
             AssistantEvent::TextDelta(text) if text == "Final answer"
         ));
         let rendered = String::from_utf8(out).expect("utf8");
-        assert!(rendered.contains("▶ Thinking (6 chars hidden)"));
+        // "step 1" is 6 bytes -> ~6/4 + 1 = 2 estimated tokens.
+        assert!(rendered.contains("▶ Thinking (◔_◔) (~2 tokens hidden)"));
         assert!(!rendered.contains("step 1"));
     }
 

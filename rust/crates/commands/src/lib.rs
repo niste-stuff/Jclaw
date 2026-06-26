@@ -1109,7 +1109,11 @@ pub enum SlashCommand {
         args: Option<String>,
     },
     Doctor,
-    Setup,
+    Setup {
+        /// True when invoked via the `/api` alias rather than `/setup`. Controls
+        /// the wizard heading (`config` vs `Setup Wizard`).
+        from_api: bool,
+    },
     Login,
     Logout,
     Vim,
@@ -1231,7 +1235,7 @@ impl SlashCommand {
             Self::Compact { .. } => "/compact",
             Self::Cost => "/cost",
             Self::Doctor => "/doctor",
-            Self::Setup => "/setup",
+            Self::Setup { .. } => "/setup",
             Self::Config { .. } => "/config",
             Self::Memory { .. } => "/memory",
             Self::History { .. } => "/history",
@@ -1403,7 +1407,9 @@ pub fn validate_slash_command_input(
         }
         "setup" | "api" => {
             validate_no_args(command, &args)?;
-            SlashCommand::Setup
+            SlashCommand::Setup {
+                from_api: command == "api",
+            }
         }
         "login" | "logout" => {
             return Err(command_error(
@@ -5394,7 +5400,7 @@ pub fn handle_slash_command(
         | SlashCommand::AddDir { .. }
         | SlashCommand::History { .. }
         | SlashCommand::Team { .. }
-        | SlashCommand::Setup
+        | SlashCommand::Setup { .. }
         | SlashCommand::Unknown(_) => None,
     }
 }

@@ -1680,45 +1680,6 @@ fn resumed_inventory_commands_emit_structured_json_when_requested() {
         agents["count"].is_number(),
         "count must be a number, not a text render"
     );
-
-    let plugins = assert_json_command_with_env(
-        &root,
-        &[
-            "--output-format",
-            "json",
-            "--resume",
-            session_path.to_str().expect("utf8 session path"),
-            "/plugins",
-        ],
-        &[
-            (
-                "CLAW_CONFIG_HOME",
-                config_home.to_str().expect("utf8 config home"),
-            ),
-            ("HOME", home.to_str().expect("utf8 home")),
-        ],
-    );
-    assert_eq!(plugins["kind"], "plugin");
-    assert_eq!(plugins["action"], "list");
-    assert_eq!(plugins["status"], "ok");
-    assert!(plugins["config_load_error"].is_null());
-    // reload_runtime and target are operation-result fields; list response omits them (#703)
-    assert!(
-        !plugins
-            .as_object()
-            .is_some_and(|o| o.contains_key("reload_runtime")),
-        "plugins list should not include reload_runtime"
-    );
-    assert!(
-        !plugins
-            .as_object()
-            .is_some_and(|o| o.contains_key("target")),
-        "plugins list should not include target"
-    );
-    assert!(
-        plugins["summary"]["total"].is_number(),
-        "plugins list should have summary.total"
-    );
 }
 
 #[test]
@@ -4064,13 +4025,11 @@ fn interactive_only_guard_batch_769_to_771() {
 }
 
 #[test]
-fn resume_plugin_mutations_are_typed_interactive_only_777() {
-    // #777: `/plugins install|enable|disable|uninstall|update` in resume mode returned
-    // a generic single-line error; after #776's classify/split it fell to
-    // error_kind:"unknown" + hint:null because there was no interactive_only: prefix.
-    // Fix: each mutation arm now returns "interactive_only: ... \n..." so the caller
-    // gets error_kind:interactive_only + non-null hint pointing at live REPL.
-    let root = unique_temp_dir("resume-plugin-mutations-777");
+fn resume_removed_plugin_command_is_unsupported() {
+    // Jclaw fork: the plugin / marketplace command is removed. Every plugin
+    // slash invocation (and its aliases) is intercepted by STUB_COMMANDS in
+    // resume mode and reported as an unsupported command, never dispatched.
+    let root = unique_temp_dir("resume-plugin-removed");
     fs::create_dir_all(&root).expect("temp dir should exist");
     std::process::Command::new("git")
         .args(["init", "-q"])
@@ -4079,10 +4038,9 @@ fn resume_plugin_mutations_are_typed_interactive_only_777() {
         .ok();
 
     // Create a minimal session file so we get past session load and into command dispatch
-    let session_file = write_session_fixture(&root, "resume-plugin-777", None);
+    let session_file = write_session_fixture(&root, "resume-plugin-removed", None);
 
-    for mutation in &["install", "enable", "disable", "uninstall", "update"] {
-        let cmd = format!("/plugins {mutation} my-plugin");
+    for cmd in &["/plugins install my-plugin", "/plugin list", "/marketplace"] {
         let output = run_claw(
             &root,
             &[
@@ -4090,13 +4048,13 @@ fn resume_plugin_mutations_are_typed_interactive_only_777() {
                 session_file.to_str().unwrap(),
                 "--output-format",
                 "json",
-                &cmd,
+                cmd,
             ],
             &[],
         );
         assert!(
             !output.status.success(),
-            "/plugins {mutation} in resume mode should exit non-zero"
+            "{cmd} in resume mode should exit non-zero"
         );
         let _stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -4104,23 +4062,12 @@ fn resume_plugin_mutations_are_typed_interactive_only_777() {
         let json_line = stdout
             .lines()
             .find(|l| l.trim_start().starts_with('{'))
-            .unwrap_or_else(|| {
-                panic!("/plugins {mutation} should emit JSON error on stdout, got: {stderr}")
-            });
+            .unwrap_or_else(|| panic!("{cmd} should emit JSON error on stdout, got: {stderr}"));
         let parsed: serde_json::Value = serde_json::from_str(json_line).unwrap();
         assert_eq!(
-            parsed["error_kind"], "interactive_only",
-            "/plugins {mutation} must return interactive_only, got {:?}",
+            parsed["error_kind"], "unsupported_command",
+            "{cmd} must return unsupported_command, got {:?}",
             parsed["error_kind"]
-        );
-        let hint = parsed["hint"].as_str().unwrap_or("");
-        assert!(
-            !hint.is_empty(),
-            "/plugins {mutation} must have non-null hint (#777)"
-        );
-        assert!(
-            hint.contains("claw") || hint.contains("REPL") || hint.contains("plugins"),
-            "/plugins {mutation} hint must reference live session or CLI, got: {hint:?}"
         );
     }
 }

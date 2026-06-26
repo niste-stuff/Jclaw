@@ -115,6 +115,79 @@ impl Spinner {
     }
 }
 
+/// A horizontal rule with a label embedded near the right edge, Hermes-style:
+/// `────────────────────────── Jclaw v0.1.3 ───`. The label is padded with a
+/// single space on each side and followed by three trailing dashes; the rest of
+/// `width` is filled with leading dashes. If `width` is too small to fit the
+/// label, the rule degrades to a plain line of dashes.
+#[must_use]
+pub fn titled_rule(label: &str, width: usize) -> String {
+    const TRAILING: usize = 3;
+    let label_part = format!(" {label} ");
+    let label_len = label_part.chars().count();
+    if width <= label_len + TRAILING {
+        return "─".repeat(width);
+    }
+    let leading = width - label_len - TRAILING;
+    format!(
+        "{}{}{}",
+        "─".repeat(leading),
+        label_part,
+        "─".repeat(TRAILING)
+    )
+}
+
+/// Compact token/number formatting, mirroring Hermes' `fmtK`: `1234 -> "1.2k"`,
+/// `200_000 -> "200k"`, `1_500_000 -> "1.5m"`. Values under 1000 render as-is.
+#[must_use]
+pub fn fmt_compact(n: u64) -> String {
+    const K: u64 = 1_000;
+    const M: u64 = 1_000_000;
+    const B: u64 = 1_000_000_000;
+    let (value, suffix) = if n >= B {
+        (n as f64 / B as f64, 'b')
+    } else if n >= M {
+        (n as f64 / M as f64, 'm')
+    } else if n >= K {
+        (n as f64 / K as f64, 'k')
+    } else {
+        return n.to_string();
+    };
+    // One decimal place, but drop a trailing ".0" so 200k stays "200k".
+    if (value * 10.0).round() % 10.0 == 0.0 {
+        format!("{}{suffix}", value.round() as u64)
+    } else {
+        format!("{value:.1}{suffix}")
+    }
+}
+
+/// Short elapsed-time formatting, mirroring Hermes' `fmtDuration`: `"45s"`,
+/// `"3m 20s"`, `"2h 5m"`.
+#[must_use]
+pub fn fmt_short_duration(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{h}h {m}m")
+    } else if m > 0 {
+        format!("{m}m {s}s")
+    } else {
+        format!("{s}s")
+    }
+}
+
+/// A context-usage progress bar like Hermes' `ctxBar`: `filled` cells of `█`
+/// followed by `█`-complemented `░`, sized to `width` columns. `pct` is clamped
+/// to `0..=100`.
+#[must_use]
+pub fn context_bar(pct: u8, width: usize) -> String {
+    let pct = pct.min(100) as usize;
+    // Round half-up, matching Hermes' `Math.round((p/100)*w)`.
+    let filled = ((pct * width + 50) / 100).min(width);
+    format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ListKind {
     Unordered,
@@ -888,7 +961,7 @@ fn visible_width(input: &str) -> usize {
     strip_ansi(input).chars().count()
 }
 
-fn strip_ansi(input: &str) -> String {
+pub fn strip_ansi(input: &str) -> String {
     let mut output = String::new();
     let mut chars = input.chars().peekable();
 
@@ -912,7 +985,53 @@ fn strip_ansi(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{strip_ansi, MarkdownStreamState, Spinner, TerminalRenderer};
+    use super::{
+        context_bar, fmt_compact, fmt_short_duration, strip_ansi, titled_rule, MarkdownStreamState,
+        Spinner, TerminalRenderer,
+    };
+
+    #[test]
+    fn fmt_compact_matches_hermes_style() {
+        assert_eq!(fmt_compact(0), "0");
+        assert_eq!(fmt_compact(999), "999");
+        assert_eq!(fmt_compact(1234), "1.2k");
+        assert_eq!(fmt_compact(200_000), "200k");
+        assert_eq!(fmt_compact(1_500_000), "1.5m");
+    }
+
+    #[test]
+    fn fmt_short_duration_matches_hermes_style() {
+        assert_eq!(fmt_short_duration(0), "0s");
+        assert_eq!(fmt_short_duration(45), "45s");
+        assert_eq!(fmt_short_duration(200), "3m 20s");
+        assert_eq!(fmt_short_duration(7500), "2h 5m");
+    }
+
+    #[test]
+    fn context_bar_fills_proportionally() {
+        assert_eq!(context_bar(0, 10), "░░░░░░░░░░");
+        assert_eq!(context_bar(100, 10), "██████████");
+        assert_eq!(context_bar(6, 10), "█░░░░░░░░░");
+        // 4% of 10 rounds down to 0 filled cells (round-half-up).
+        assert_eq!(context_bar(4, 10), "░░░░░░░░░░");
+        assert_eq!(context_bar(200, 10), "██████████");
+    }
+
+    #[test]
+    fn titled_rule_embeds_label_and_fills_width() {
+        let rule = titled_rule("Jclaw v0.1.3", 40);
+        assert_eq!(rule.chars().count(), 40);
+        assert!(rule.contains(" Jclaw v0.1.3 "));
+        assert!(rule.ends_with("───"));
+        assert!(rule.starts_with('─'));
+    }
+
+    #[test]
+    fn titled_rule_degrades_to_plain_line_when_too_narrow() {
+        // Label cannot fit in 4 columns, so fall back to a bare rule.
+        let rule = titled_rule("Jclaw v0.1.3", 4);
+        assert_eq!(rule, "────");
+    }
 
     #[test]
     fn renders_markdown_with_styling_and_lists() {

@@ -49,15 +49,21 @@ const API_KEY_ENV_VARS: &[(&str, &str)] = &[
     ("dashscope", "DASHSCOPE_API_KEY"),
 ];
 
-pub fn run_setup_wizard() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_setup_wizard(from_api: bool) -> Result<(), Box<dyn std::error::Error>> {
     if !io::stdin().is_terminal() {
-        return Err("setup wizard requires an interactive terminal".into());
+        return Err("setup requires an interactive terminal".into());
     }
 
     let current = load_current_provider_config();
 
+    let heading = if from_api {
+        "Jclaw Config"
+    } else {
+        "Jclaw Setup Wizard"
+    };
+
     println!();
-    println!("  \x1b[1mJclaw Setup Wizard\x1b[0m");
+    println!("  \x1b[1m{heading}\x1b[0m");
     println!("  Configure your provider, API key, and model.");
     println!("  \x1b[2mPress Enter to keep current value · Esc to cancel.\x1b[0m\n");
 
@@ -74,12 +80,17 @@ pub fn run_setup_wizard() -> Result<(), Box<dyn std::error::Error>> {
         save_settings_field("subagentModel", fast)?;
     }
 
+    let activate_model = model.as_deref().unwrap_or(&kind);
+
     println!();
     println!("  \x1b[32mProvider saved to ~/.claw/settings.json\x1b[0m");
-    println!(
-        "  Run \x1b[1m/model {}\x1b[0m or restart claw to activate.",
-        model.as_deref().unwrap_or(&kind)
-    );
+    println!("  Run \x1b[1m/model {activate_model}\x1b[0m or restart claw to activate.");
+    if let Some(bare) = activate_model.strip_prefix("local/") {
+        println!(
+            "  \x1b[2m(`local/` is a routing prefix, not a local model — it forces your \
+             custom endpoint and is stripped before `{bare}` is sent.)\x1b[0m"
+        );
+    }
     println!();
 
     Ok(())
@@ -94,24 +105,53 @@ fn load_current_provider_config() -> RuntimeProviderConfig {
 }
 
 fn prompt_provider(current: &RuntimeProviderConfig) -> Result<String, Box<dyn std::error::Error>> {
-    let current_kind = current.kind().unwrap_or("anthropic");
+    let current_index = current_provider_index(current);
     let options: Vec<String> = PROVIDERS
         .iter()
-        .map(|(_, label, kind)| {
-            if *kind == current_kind {
+        .enumerate()
+        .map(|(i, (_, label, _))| {
+            if Some(i) == current_index {
                 format!("{label} (current)")
             } else {
                 (*label).to_string()
             }
         })
         .collect();
-    let default = PROVIDERS
+
+    let choice =
+        select_menu("Provider", &options, current_index.unwrap_or(0))?.ok_or("setup cancelled")?;
+    Ok(PROVIDERS[choice].2.to_string())
+}
+
+/// Resolve which `PROVIDERS` row matches the current config. Two rows share the
+/// `openai` kind (the branded OpenAI endpoint and the generic
+/// `Custom (OpenAI-compat)` row), so a plain kind match would tag both as
+/// `(current)`. Disambiguate the OpenAI-compatible rows by base URL: only the
+/// built-in `api.openai.com` endpoint counts as branded OpenAI; anything else
+/// (or a non-default URL) is the custom row.
+fn current_provider_index(current: &RuntimeProviderConfig) -> Option<usize> {
+    let current_kind = current.kind().unwrap_or("anthropic");
+
+    if current_kind == "openai" {
+        let openai_default = DEFAULT_BASE_URLS
+            .iter()
+            .find(|(k, _)| *k == "openai")
+            .map_or("", |(_, v)| *v);
+        let base = current.base_url().unwrap_or("");
+        let is_branded_openai = base.is_empty() || base == openai_default;
+        let target_label = if is_branded_openai {
+            "OpenAI"
+        } else {
+            "Custom (OpenAI-compat)"
+        };
+        return PROVIDERS
+            .iter()
+            .position(|(_, label, _)| *label == target_label);
+    }
+
+    PROVIDERS
         .iter()
         .position(|(_, _, kind)| *kind == current_kind)
-        .unwrap_or(0);
-
-    let choice = select_menu("Provider", &options, default)?.ok_or("setup cancelled")?;
-    Ok(PROVIDERS[choice].2.to_string())
 }
 
 fn prompt_api_key(
@@ -325,7 +365,7 @@ pub fn ensure_provider_configured() {
     println!();
     println!("  \x1b[1mNo API credentials detected.\x1b[0m");
     println!("  Set up a provider now — Anthropic or any OpenAI-compatible endpoint.");
-    if let Err(error) = run_setup_wizard() {
+    if let Err(error) = run_setup_wizard(false) {
         // Esc/Ctrl-C is a deliberate cancel, not a crash — exit cleanly with a
         // friendly next-step hint instead of falling through to the generic
         // "missing Anthropic credentials" error stack.
@@ -631,7 +671,7 @@ pub fn run_config_menu() -> Result<(), Box<dyn std::error::Error>> {
             0 => {
                 // The provider wizard cancelling (Esc) should drop back to this
                 // hub, not abort the whole menu.
-                if let Err(error) = run_setup_wizard() {
+                if let Err(error) = run_setup_wizard(true) {
                     if error.to_string().contains("cancelled") {
                         println!("  \x1b[2mProvider setup cancelled — nothing changed.\x1b[0m");
                     } else {
