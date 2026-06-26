@@ -2,6 +2,8 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::io::{self, IsTerminal, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -21,6 +23,9 @@ pub enum ReadOutcome {
     Submit(String),
     Cancel,
     Exit,
+    /// Shift+Tab was pressed on an empty prompt: the caller should advance to
+    /// the next permission mode and redraw.
+    CyclePermissionMode,
 }
 
 struct SlashCommandHelper {
@@ -111,6 +116,10 @@ impl Helper for SlashCommandHelper {}
 pub struct LineEditor {
     prompt: String,
     editor: Editor<SlashCommandHelper, DefaultHistory>,
+    /// Set by the Shift+Tab handler when the user asks to cycle permission
+    /// modes; consumed (and reset) by `read_line`. Shared with the rustyline
+    /// event handler, which requires `Send + Sync`.
+    cycle_permission_flag: Arc<AtomicBool>,
 }
 
 impl LineEditor {
@@ -133,9 +142,23 @@ impl LineEditor {
             EventHandler::Conditional(Box::new(SlashMenuTrigger)),
         );
 
+        // Shift+Tab on an empty prompt cycles the permission mode (Claude Code
+        // parity). Terminals report Shift+Tab as the dedicated `BackTab` key, so
+        // the canonical (modifier-less) form is all we bind — binding a second
+        // SHIFT-modified variant would serialize to the same escape sequence and
+        // panic rustyline's key trie.
+        let cycle_permission_flag = Arc::new(AtomicBool::new(false));
+        editor.bind_sequence(
+            KeyEvent(KeyCode::BackTab, Modifiers::NONE),
+            EventHandler::Conditional(Box::new(PermissionCycleTrigger {
+                flag: Arc::clone(&cycle_permission_flag),
+            })),
+        );
+
         Self {
             prompt: prompt.into(),
             editor,
+            cycle_permission_flag,
         }
     }
 
@@ -164,7 +187,16 @@ impl LineEditor {
         }
 
         match self.editor.readline(&self.prompt) {
-            Ok(line) => Ok(ReadOutcome::Submit(line)),
+            Ok(line) => {
+                // The Shift+Tab handler accepts an empty line to break out of
+                // the editor; translate that into a cycle request rather than an
+                // empty submission.
+                if self.cycle_permission_flag.swap(false, Ordering::SeqCst) {
+                    Ok(ReadOutcome::CyclePermissionMode)
+                } else {
+                    Ok(ReadOutcome::Submit(line))
+                }
+            }
             Err(ReadlineError::Interrupted) => {
                 let has_input = !self.current_line().is_empty();
                 self.finish_interrupted_read()?;
@@ -300,6 +332,31 @@ impl ConditionalEventHandler for SlashMenuTrigger {
     ) -> Option<Cmd> {
         if ctx.line().is_empty() {
             Some(Cmd::Complete)
+        } else {
+            None
+        }
+    }
+}
+
+/// Cycles the permission mode when Shift+Tab is pressed on an empty prompt.
+/// On a non-empty line it does nothing so the keystroke can't disturb a draft.
+struct PermissionCycleTrigger {
+    flag: Arc<AtomicBool>,
+}
+
+impl ConditionalEventHandler for PermissionCycleTrigger {
+    fn handle(
+        &self,
+        _evt: &Event,
+        _n: RepeatCount,
+        _positive: bool,
+        ctx: &EventContext,
+    ) -> Option<Cmd> {
+        if ctx.line().is_empty() {
+            self.flag.store(true, Ordering::SeqCst);
+            // Accepting the (empty) line returns control to `read_line`, which
+            // sees the flag and reports a cycle request.
+            Some(Cmd::AcceptLine)
         } else {
             None
         }

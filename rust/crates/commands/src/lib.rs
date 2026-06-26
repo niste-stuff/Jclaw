@@ -97,7 +97,7 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         name: "permissions",
         aliases: &[],
         summary: "Show or switch the active permission mode",
-        argument_hint: Some("[read-only|workspace-write|danger-full-access]"),
+        argument_hint: Some("[plan|auto|bypass|read-only|workspace-write|danger-full-access]"),
         resume_supported: false,
     },
     SlashCommandSpec {
@@ -1551,29 +1551,46 @@ fn require_remainder(
 }
 
 fn parse_permissions_mode(args: &[&str]) -> Result<Option<String>, SlashCommandParseError> {
-    let mode = optional_single_arg(
-        "permissions",
-        args,
-        "[read-only|workspace-write|danger-full-access]",
-    )?;
+    let mode = optional_single_arg("permissions", args, PERMISSIONS_ARG_HINT)?;
     if let Some(mode) = mode {
+        // Accept Claude Code's named modes (plan / acceptEdits / bypassPermissions
+        // and their friendly aliases) alongside the runtime's enforcement names.
+        // The CLI layer resolves the exact preset; here we only gate the surface.
         if matches!(
             mode.as_str(),
-            "read-only" | "workspace-write" | "danger-full-access"
+            "plan"
+                | "read-only"
+                | "readonly"
+                | "default"
+                | "workspace-write"
+                | "acceptEdits"
+                | "accept-edits"
+                | "auto"
+                | "danger-full-access"
+                | "dangerFullAccess"
+                | "bypassPermissions"
+                | "bypass"
+                | "dontAsk"
         ) {
             return Ok(Some(mode));
         }
         return Err(command_error(
             &format!(
-                "Unsupported /permissions mode '{mode}'. Use read-only, workspace-write, or danger-full-access."
+                "Unsupported /permissions mode '{mode}'. Use plan, auto, bypass, read-only, workspace-write, or danger-full-access."
             ),
             "permissions",
-            "/permissions [read-only|workspace-write|danger-full-access]",
+            "/permissions [plan|auto|bypass|read-only|workspace-write|danger-full-access]",
         ));
     }
 
     Ok(None)
 }
+
+/// Shared argument hint for the `/permissions` command. Listed friendly aliases
+/// (plan / auto / bypass) front the Claude Code modes; the runtime's enforcement
+/// names remain accepted for back-compat.
+const PERMISSIONS_ARG_HINT: &str =
+    "[plan|auto|bypass|read-only|workspace-write|danger-full-access]";
 
 fn parse_clear_args(args: &[&str]) -> Result<bool, SlashCommandParseError> {
     match args {
@@ -5808,10 +5825,10 @@ mod tests {
 
         // then
         assert!(error.contains(
-            "Unsupported /permissions mode 'admin'. Use read-only, workspace-write, or danger-full-access."
+            "Unsupported /permissions mode 'admin'. Use plan, auto, bypass, read-only, workspace-write, or danger-full-access."
         ));
         assert!(error.contains(
-            "  Usage            /permissions [read-only|workspace-write|danger-full-access]"
+            "  Usage            /permissions [plan|auto|bypass|read-only|workspace-write|danger-full-access]"
         ));
     }
 
@@ -5993,7 +6010,9 @@ mod tests {
         assert!(help.contains("/teleport <symbol-or-path>"));
         assert!(help.contains("/debug-tool-call"));
         assert!(help.contains("/model [model]"));
-        assert!(help.contains("/permissions [read-only|workspace-write|danger-full-access]"));
+        assert!(help.contains(
+            "/permissions [plan|auto|bypass|read-only|workspace-write|danger-full-access]"
+        ));
         assert!(help.contains("/clear [--confirm]"));
         assert!(help.contains("/cost"));
         assert!(help.contains("/resume <session-path>"));

@@ -1101,7 +1101,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             let effective_prompt = merge_prompt_with_stdin(&prompt, stdin_context.as_deref());
             let resolved_model = resolve_repl_model(model)?;
-            let mut cli = LiveCli::new(resolved_model, true, allowed_tools, permission_mode)?;
+            let mut cli = LiveCli::new(
+                resolved_model,
+                true,
+                allowed_tools,
+                PermissionPreset::from_mode(permission_mode),
+            )?;
             cli.set_reasoning_effort(reasoning_effort);
             cli.run_turn_with_output(&effective_prompt, output_format, compact)?;
         }
@@ -1159,14 +1164,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::Repl {
             model,
             allowed_tools,
-            permission_mode,
+            permission_preset,
             base_commit,
             reasoning_effort,
             allow_broad_cwd,
         } => run_repl(
             model,
             allowed_tools,
-            permission_mode,
+            permission_preset,
             base_commit,
             reasoning_effort,
             allow_broad_cwd,
@@ -1288,7 +1293,7 @@ enum CliAction {
     Repl {
         model: String,
         allowed_tools: Option<AllowedToolSet>,
-        permission_mode: PermissionMode,
+        permission_preset: PermissionPreset,
         base_commit: Option<String>,
         reasoning_effort: Option<String>,
         allow_broad_cwd: bool,
@@ -1513,6 +1518,10 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     set_current_output_format_selection(&output_format_selection);
     let mut output_format = output_format_selection.format;
     let mut permission_mode_override = None;
+    // Tracks the user-facing preset (plan / acceptEdits / bypassPermissions / …)
+    // separately from the enforced mode, so the REPL can launch directly into a
+    // named mode and apply plan-mode behavior. Only consumed by the Repl action.
+    let mut permission_preset_override: Option<PermissionPreset> = None;
     let mut wants_help = false;
     let mut wants_version = false;
     let mut wants_config = false;
@@ -1603,12 +1612,14 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             "--permission-mode" => {
                 let value = args
                     .get(index + 1)
-                    .ok_or_else(|| "missing_flag_value: missing value for --permission-mode.\nUsage: --permission-mode read-only|workspace-write|danger-full-access".to_string())?;
+                    .ok_or_else(|| format!("missing_flag_value: missing value for --permission-mode.\nUsage: --permission-mode {PERMISSION_MODE_HINT}"))?;
                 // #468: track duplicate --permission-mode flags
                 if permission_mode_override.is_some() {
                     push_duplicate_flag("--permission-mode (overwriting previous value)");
                 }
-                permission_mode_override = Some(parse_permission_mode_arg(value)?);
+                let preset = parse_permission_preset_arg(value)?;
+                permission_preset_override = Some(preset);
+                permission_mode_override = Some(preset.enforced());
                 index += 2;
             }
 
@@ -1618,11 +1629,14 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 index += 1;
             }
             flag if flag.starts_with("--permission-mode=") => {
-                permission_mode_override = Some(parse_permission_mode_arg(&flag[18..])?);
+                let preset = parse_permission_preset_arg(&flag[18..])?;
+                permission_preset_override = Some(preset);
+                permission_mode_override = Some(preset.enforced());
                 index += 1;
             }
             "--dangerously-skip-permissions" | "--skip-permissions" => {
                 permission_mode_override = Some(PermissionMode::DangerFullAccess);
+                permission_preset_override = Some(PermissionPreset::BypassPermissions);
                 index += 1;
             }
             "--compact" => {
@@ -1873,6 +1887,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
 
     if rest.is_empty() {
         let permission_mode = permission_mode_override.unwrap_or_else(default_permission_mode);
+        let permission_preset = permission_preset_override
+            .unwrap_or_else(|| PermissionPreset::from_mode(permission_mode));
         let stdin_is_terminal = std::io::stdin().is_terminal();
         if compact && stdin_is_terminal {
             return Err(compact_missing_argument_error());
@@ -1912,7 +1928,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         return Ok(CliAction::Repl {
             model,
             allowed_tools,
-            permission_mode,
+            permission_preset,
             base_commit,
             reasoning_effort: reasoning_effort.clone(),
             allow_broad_cwd,
@@ -2055,7 +2071,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         // forms here and return a structured guidance error so no network
         // call or session is created.
         "permissions" => Err(
-            "`claw permissions` is a slash command. Start `claw` and run `/permissions` inside the REPL.\n  Usage  /permissions [read-only|workspace-write|danger-full-access]"
+            "`claw permissions` is a slash command. Start `claw` and run `/permissions` inside the REPL.\n  Usage  /permissions [plan|auto|bypass|read-only|workspace-write|danger-full-access]"
                 .to_string(),
         ),
         // #767: `claw session bogus` bypassed parse_single_word_command_alias (rest.len()>1),
@@ -3073,14 +3089,12 @@ fn current_tool_registry() -> Result<GlobalToolRegistry, String> {
     Ok(registry)
 }
 
-fn parse_permission_mode_arg(value: &str) -> Result<PermissionMode, String> {
-    normalize_permission_mode(value)
-        .ok_or_else(|| {
-            format!(
-                "invalid_permission_mode: unsupported permission mode '{value}'.\nUsage: --permission-mode read-only|workspace-write|danger-full-access"
-            )
-        })
-        .map(permission_mode_from_label)
+fn parse_permission_preset_arg(value: &str) -> Result<PermissionPreset, String> {
+    PermissionPreset::from_label(value).ok_or_else(|| {
+        format!(
+            "invalid_permission_mode: unsupported permission mode '{value}'.\nUsage: --permission-mode {PERMISSION_MODE_HINT}"
+        )
+    })
 }
 
 fn permission_mode_from_label(mode: &str) -> PermissionMode {
@@ -3090,6 +3104,124 @@ fn permission_mode_from_label(mode: &str) -> PermissionMode {
         "danger-full-access" => PermissionMode::DangerFullAccess,
         other => panic!("unsupported permission mode label: {other}"),
     }
+}
+
+/// User-facing permission preset selected via `--permission-mode`, the
+/// `/permissions` command, or the shift+tab cycle. Distinct from the enforced
+/// [`PermissionMode`]: several presets resolve to the same enforcement level but
+/// carry different identity and behavior. In particular `Plan` enforces
+/// read-only access *and* appends a planning addendum to the system prompt so
+/// the model researches and proposes a plan instead of editing files or running
+/// state-changing commands. These names mirror Claude Code's modes (plan /
+/// acceptEdits / bypassPermissions) layered over the runtime's three enforcement
+/// levels.
+/// Shared usage hint listing the accepted `--permission-mode` / `/permissions`
+/// values. Mirrors [`PermissionPreset::from_label`].
+const PERMISSION_MODE_HINT: &str = "plan|auto|bypass|read-only|workspace-write|danger-full-access";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PermissionPreset {
+    Plan,
+    ReadOnly,
+    WorkspaceWrite,
+    AcceptEdits,
+    DangerFullAccess,
+    BypassPermissions,
+}
+
+impl PermissionPreset {
+    /// Canonical label shown in reports and accepted by `/permissions`.
+    fn canonical(self) -> &'static str {
+        match self {
+            Self::Plan => "plan",
+            Self::ReadOnly => "read-only",
+            Self::WorkspaceWrite => "workspace-write",
+            Self::AcceptEdits => "acceptEdits",
+            Self::DangerFullAccess => "danger-full-access",
+            Self::BypassPermissions => "bypassPermissions",
+        }
+    }
+
+    /// Enforcement level applied to tool calls under this preset.
+    fn enforced(self) -> PermissionMode {
+        match self {
+            Self::Plan | Self::ReadOnly => PermissionMode::ReadOnly,
+            Self::WorkspaceWrite | Self::AcceptEdits => PermissionMode::WorkspaceWrite,
+            Self::DangerFullAccess | Self::BypassPermissions => PermissionMode::DangerFullAccess,
+        }
+    }
+
+    /// One-line description shown in the `/permissions` report.
+    fn description(self) -> &'static str {
+        match self {
+            Self::Plan => "Research and present a plan; no edits or commands",
+            Self::ReadOnly => "Read/search tools only",
+            Self::WorkspaceWrite => "Edit files inside the workspace",
+            Self::AcceptEdits => "Auto-accept workspace edits",
+            Self::DangerFullAccess => "Unrestricted tool access",
+            Self::BypassPermissions => "Bypass all permission prompts",
+        }
+    }
+
+    /// Parse a user-supplied label, accepting Claude Code aliases (`auto`,
+    /// `bypass`, `default`, …) alongside the canonical names.
+    fn from_label(value: &str) -> Option<Self> {
+        match value.trim() {
+            "plan" => Some(Self::Plan),
+            "read-only" | "readonly" => Some(Self::ReadOnly),
+            "default" | "workspace-write" => Some(Self::WorkspaceWrite),
+            "acceptEdits" | "accept-edits" | "auto" => Some(Self::AcceptEdits),
+            "danger-full-access" | "dangerFullAccess" => Some(Self::DangerFullAccess),
+            "bypassPermissions" | "bypass" | "dontAsk" => Some(Self::BypassPermissions),
+            _ => None,
+        }
+    }
+
+    /// Best-effort preset for an already-resolved enforcement mode, used when
+    /// only the enforced [`PermissionMode`] is available (e.g. one-shot `-p`).
+    fn from_mode(mode: PermissionMode) -> Self {
+        match mode {
+            PermissionMode::ReadOnly => Self::ReadOnly,
+            PermissionMode::WorkspaceWrite | PermissionMode::Prompt => Self::WorkspaceWrite,
+            PermissionMode::DangerFullAccess | PermissionMode::Allow => Self::DangerFullAccess,
+        }
+    }
+
+    /// Next preset in the shift+tab cycle, following Claude Code's order
+    /// (default → accept-edits → plan → bypass → default). Legacy presets fold
+    /// back into the cycle at the default slot.
+    fn cycle_next(self) -> Self {
+        match self {
+            Self::WorkspaceWrite => Self::AcceptEdits,
+            Self::AcceptEdits => Self::Plan,
+            Self::Plan => Self::BypassPermissions,
+            Self::BypassPermissions | Self::ReadOnly | Self::DangerFullAccess => {
+                Self::WorkspaceWrite
+            }
+        }
+    }
+}
+
+/// System-prompt addendum injected while the `Plan` preset is active. The
+/// runtime already enforces read-only access, but this nudges the model to
+/// behave like Claude Code's plan mode: investigate, then present a plan rather
+/// than attempting edits or commands it cannot run.
+const PLAN_MODE_ADDENDUM: &str = "You are in PLAN MODE. Use only read-only tools \
+(read, search, list) to investigate the request. Do NOT edit files, write files, \
+or run state-changing shell commands — write and edit tools are disabled until the \
+user leaves plan mode. When you have enough understanding, stop and present a clear, \
+concise, step-by-step implementation plan and ask the user to approve it. Tell the \
+user they can leave plan mode with `/permissions workspace-write` (or Shift+Tab to \
+cycle modes) so you can carry the plan out.";
+
+/// Append the active preset's system-prompt addendum (currently only plan mode
+/// adds one) to a base prompt, returning the prompt to send for this turn.
+fn system_prompt_with_preset(base: &[String], preset: PermissionPreset) -> Vec<String> {
+    let mut prompt = base.to_vec();
+    if preset == PermissionPreset::Plan {
+        prompt.push(PLAN_MODE_ADDENDUM.to_string());
+    }
+    prompt
 }
 
 fn permission_mode_from_resolved(mode: ResolvedPermissionMode) -> PermissionMode {
@@ -3313,18 +3445,19 @@ fn format_status_bar(data: &StatusBarData) -> String {
 /// Render the banner's permission value, flagging risky modes so an unattended
 /// `danger-full-access` (no approval prompts) can't hide in plain gray. Safe
 /// modes render plain; auto-approving modes are colored and annotated.
-fn permission_banner_value(mode: PermissionMode) -> String {
-    let label = mode.as_str();
-    match mode {
-        PermissionMode::DangerFullAccess => {
+fn permission_banner_value(preset: PermissionPreset) -> String {
+    let label = preset.canonical();
+    match preset {
+        PermissionPreset::DangerFullAccess | PermissionPreset::BypassPermissions => {
             format!("\x1b[1;31m{label}\x1b[0m \x1b[2m(no approval prompts)\x1b[0m")
         }
-        PermissionMode::Allow => {
-            format!("\x1b[33m{label}\x1b[0m \x1b[2m(auto-approves tools)\x1b[0m")
+        PermissionPreset::AcceptEdits => {
+            format!("\x1b[32m{label}\x1b[0m \x1b[2m(auto-accepts edits)\x1b[0m")
         }
-        PermissionMode::ReadOnly | PermissionMode::WorkspaceWrite | PermissionMode::Prompt => {
-            label.to_string()
+        PermissionPreset::Plan => {
+            format!("\x1b[36m{label}\x1b[0m \x1b[2m(read-only; presents a plan)\x1b[0m")
         }
+        PermissionPreset::ReadOnly | PermissionPreset::WorkspaceWrite => label.to_string(),
     }
 }
 
@@ -4473,7 +4606,7 @@ fn check_permission_health(permission_mode: PermissionModeProvenance) -> Diagnos
     .with_hint(if warning {
         "Use the workspace-write default, or pass --permission-mode danger-full-access / --dangerously-skip-permissions only when full filesystem, network, and command access is intentional."
     } else {
-        "Use --permission-mode read-only|workspace-write|danger-full-access to make the runtime permission boundary explicit."
+        "Use --permission-mode plan|auto|bypass|read-only|workspace-write|danger-full-access to make the runtime permission boundary explicit."
     })
     .with_data(Map::from_iter([
         ("mode".to_string(), json!(mode)),
@@ -6320,26 +6453,22 @@ fn format_model_switch_report(previous: &str, next: &str, message_count: usize) 
 
 fn format_permissions_report(mode: &str) -> String {
     let modes = [
-        ("read-only", "Read/search tools only", mode == "read-only"),
-        (
-            "workspace-write",
-            "Edit files inside the workspace",
-            mode == "workspace-write",
-        ),
-        (
-            "danger-full-access",
-            "Unrestricted tool access",
-            mode == "danger-full-access",
-        ),
+        PermissionPreset::Plan,
+        PermissionPreset::ReadOnly,
+        PermissionPreset::WorkspaceWrite,
+        PermissionPreset::AcceptEdits,
+        PermissionPreset::DangerFullAccess,
+        PermissionPreset::BypassPermissions,
     ]
     .into_iter()
-    .map(|(name, description, is_current)| {
-        let marker = if is_current {
+    .map(|preset| {
+        let name = preset.canonical();
+        let marker = if name == mode {
             "● current"
         } else {
             "○ available"
         };
-        format!("  {name:<18} {marker:<11} {description}")
+        format!("  {name:<18} {marker:<11} {}", preset.description())
     })
     .collect::<Vec<_>>()
     .join(
@@ -7266,7 +7395,7 @@ fn run_stale_base_preflight(flag_value: Option<&str>) {
 fn run_repl(
     model: String,
     allowed_tools: Option<AllowedToolSet>,
-    permission_mode: PermissionMode,
+    permission_preset: PermissionPreset,
     base_commit: Option<String>,
     reasoning_effort: Option<String>,
     allow_broad_cwd: bool,
@@ -7278,7 +7407,7 @@ fn run_repl(
     setup_wizard::ensure_provider_configured();
     run_stale_base_preflight(base_commit.as_deref());
     let resolved_model = resolve_repl_model(model)?;
-    let mut cli = LiveCli::new(resolved_model, true, allowed_tools, permission_mode)?;
+    let mut cli = LiveCli::new(resolved_model, true, allowed_tools, permission_preset)?;
     cli.set_reasoning_effort(reasoning_effort);
     let mut editor =
         input::LineEditor::new("> ", cli.repl_completion_candidates().unwrap_or_default());
@@ -7292,8 +7421,15 @@ fn run_repl(
         let rule = "─".repeat(banner_width());
         println!("\x1b[2m{rule}\x1b[0m");
         println!("{}", cli.status_bar_line());
+        // Claude-Code-style mode footer: shows the active preset and the
+        // Shift+Tab hint so users can cycle modes from the prompt.
+        println!("{}", cli.permission_mode_indicator());
         println!("\x1b[2m{rule}\x1b[0m");
         match editor.read_line()? {
+            input::ReadOutcome::CyclePermissionMode => {
+                cli.cycle_permission_mode()?;
+                cli.persist_session()?;
+            }
             input::ReadOutcome::Submit(input) => {
                 let trimmed = input.trim().to_string();
                 if trimmed.is_empty() {
@@ -7369,7 +7505,11 @@ struct ManagedSessionSummary {
 struct LiveCli {
     model: String,
     allowed_tools: Option<AllowedToolSet>,
+    /// Enforced permission level; always equals `permission_preset.enforced()`.
     permission_mode: PermissionMode,
+    /// User-facing preset (plan / acceptEdits / bypassPermissions / …) that
+    /// carries identity and behavior beyond the enforced mode.
+    permission_preset: PermissionPreset,
     system_prompt: Vec<String>,
     runtime: BuiltRuntime,
     session: SessionHandle,
@@ -7877,8 +8017,9 @@ impl LiveCli {
         model: String,
         enable_tools: bool,
         allowed_tools: Option<AllowedToolSet>,
-        permission_mode: PermissionMode,
+        permission_preset: PermissionPreset,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let permission_mode = permission_preset.enforced();
         // claw-janitor runs the SAME full tool surface as `claw` — bash/shell,
         // file read/write/edit, glob/grep search, web, git, plus the two card
         // tools (validate_card, token_budget_check) — so it can author cards
@@ -7897,7 +8038,7 @@ impl LiveCli {
             session_state.with_persistence_path(session.path.clone()),
             &session.id,
             model.clone(),
-            system_prompt.clone(),
+            system_prompt_with_preset(&system_prompt, permission_preset),
             enable_tools,
             true,
             allowed_tools.clone(),
@@ -7908,6 +8049,7 @@ impl LiveCli {
             model,
             allowed_tools,
             permission_mode,
+            permission_preset,
             system_prompt,
             runtime,
             session,
@@ -7917,6 +8059,13 @@ impl LiveCli {
         };
         cli.persist_session()?;
         Ok(cli)
+    }
+
+    /// The system prompt actually sent to the model, including the plan-mode
+    /// addendum when the `Plan` preset is active. `system_prompt` itself stays
+    /// the unmodified base so switching presets is reversible.
+    fn effective_system_prompt(&self) -> Vec<String> {
+        system_prompt_with_preset(&self.system_prompt, self.permission_preset)
     }
 
     fn set_reasoning_effort(&mut self, effort: Option<String>) {
@@ -8033,7 +8182,7 @@ impl LiveCli {
             title_rule,
             tagline,
             self.model,
-            permission_banner_value(self.permission_mode),
+            permission_banner_value(self.permission_preset),
             cwd_display,
             self.session.id,
             session_path,
@@ -8060,7 +8209,7 @@ impl LiveCli {
             self.runtime.session().clone(),
             &self.session.id,
             self.model.clone(),
-            self.system_prompt.clone(),
+            self.effective_system_prompt(),
             true,
             emit_output,
             self.allowed_tools.clone(),
@@ -8719,7 +8868,7 @@ impl LiveCli {
             session,
             &self.session.id,
             model.clone(),
-            self.system_prompt.clone(),
+            self.effective_system_prompt(),
             true,
             true,
             self.allowed_tools.clone(),
@@ -8742,42 +8891,82 @@ impl LiveCli {
         let Some(mode) = mode else {
             println!(
                 "{}",
-                format_permissions_report(self.permission_mode.as_str())
+                format_permissions_report(self.permission_preset.canonical())
             );
             return Ok(false);
         };
 
-        let normalized = normalize_permission_mode(&mode).ok_or_else(|| {
+        let preset = PermissionPreset::from_label(&mode).ok_or_else(|| {
             format!(
-                "invalid_flag_value: unsupported permission mode '{mode}'.\nUsage: --permission-mode read-only|workspace-write|danger-full-access"
+                "invalid_flag_value: unsupported permission mode '{mode}'.\nUsage: --permission-mode {PERMISSION_MODE_HINT}"
             )
         })?;
 
-        if normalized == self.permission_mode.as_str() {
-            println!("{}", format_permissions_report(normalized));
+        if preset == self.permission_preset {
+            println!("{}", format_permissions_report(preset.canonical()));
             return Ok(false);
         }
 
-        let previous = self.permission_mode.as_str().to_string();
+        let previous = self.permission_preset.canonical().to_string();
+        self.apply_permission_preset(preset)?;
+        println!(
+            "{}",
+            format_permissions_switch_report(&previous, preset.canonical())
+        );
+        Ok(true)
+    }
+
+    /// Switch the active preset and rebuild the runtime so the new enforcement
+    /// level and any plan-mode addendum take effect on the next turn.
+    fn apply_permission_preset(
+        &mut self,
+        preset: PermissionPreset,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.permission_preset = preset;
+        self.permission_mode = preset.enforced();
         let session = self.runtime.session().clone();
-        self.permission_mode = permission_mode_from_label(normalized);
         let runtime = build_runtime(
             session,
             &self.session.id,
             self.model.clone(),
-            self.system_prompt.clone(),
+            self.effective_system_prompt(),
             true,
             true,
             self.allowed_tools.clone(),
             self.permission_mode,
             None,
         )?;
-        self.replace_runtime(runtime)?;
+        self.replace_runtime(runtime)
+    }
+
+    /// Advance to the next preset in the Shift+Tab cycle and announce the switch.
+    fn cycle_permission_mode(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let previous = self.permission_preset.canonical().to_string();
+        let next = self.permission_preset.cycle_next();
+        self.apply_permission_preset(next)?;
         println!(
             "{}",
-            format_permissions_switch_report(&previous, normalized)
+            format_permissions_switch_report(&previous, next.canonical())
         );
-        Ok(true)
+        Ok(())
+    }
+
+    /// Claude-Code-style mode footer: the active preset plus the Shift+Tab hint,
+    /// color-coded so the riskier modes stand out.
+    fn permission_mode_indicator(&self) -> String {
+        let preset = self.permission_preset;
+        let color = match preset {
+            PermissionPreset::Plan => "\x1b[36m",
+            PermissionPreset::AcceptEdits => "\x1b[32m",
+            PermissionPreset::DangerFullAccess | PermissionPreset::BypassPermissions => {
+                "\x1b[1;31m"
+            }
+            PermissionPreset::ReadOnly | PermissionPreset::WorkspaceWrite => "\x1b[2m",
+        };
+        format!(
+            "{color}⏵⏵ {}\x1b[0m \x1b[2m· Shift+Tab to cycle modes\x1b[0m",
+            preset.canonical()
+        )
     }
 
     fn clear_session(&mut self, confirm: bool) -> Result<bool, Box<dyn std::error::Error>> {
@@ -8795,7 +8984,7 @@ impl LiveCli {
             session_state.with_persistence_path(self.session.path.clone()),
             &self.session.id,
             self.model.clone(),
-            self.system_prompt.clone(),
+            self.effective_system_prompt(),
             true,
             true,
             self.allowed_tools.clone(),
@@ -8837,7 +9026,7 @@ impl LiveCli {
             session,
             &handle.id,
             self.model.clone(),
-            self.system_prompt.clone(),
+            self.effective_system_prompt(),
             true,
             true,
             self.allowed_tools.clone(),
@@ -9190,7 +9379,7 @@ impl LiveCli {
                     session,
                     &handle.id,
                     self.model.clone(),
-                    self.system_prompt.clone(),
+                    self.effective_system_prompt(),
                     true,
                     true,
                     self.allowed_tools.clone(),
@@ -9225,7 +9414,7 @@ impl LiveCli {
                     forked,
                     &handle.id,
                     self.model.clone(),
-                    self.system_prompt.clone(),
+                    self.effective_system_prompt(),
                     true,
                     true,
                     self.allowed_tools.clone(),
@@ -9308,7 +9497,7 @@ impl LiveCli {
             result.compacted_session,
             &self.session.id,
             self.model.clone(),
-            self.system_prompt.clone(),
+            self.effective_system_prompt(),
             true,
             true,
             self.allowed_tools.clone(),
@@ -9332,7 +9521,7 @@ impl LiveCli {
             session,
             &self.session.id,
             self.model.clone(),
-            self.system_prompt.clone(),
+            self.effective_system_prompt(),
             enable_tools,
             false,
             self.allowed_tools.clone(),
@@ -13688,6 +13877,9 @@ fn slash_command_completion_candidates_with_sessions(
         "/model sonnet",
         "/model haiku",
         "/permissions ",
+        "/permissions plan",
+        "/permissions auto",
+        "/permissions bypass",
         "/permissions read-only",
         "/permissions workspace-write",
         "/permissions danger-full-access",
@@ -14724,13 +14916,13 @@ mod tests {
         resolve_repl_model, resolve_session_reference, response_to_events,
         resume_supported_slash_commands, run_resume_command, short_tool_id,
         slash_command_completion_candidates_with_sessions, split_error_hint, status_context,
-        status_json_value, summarize_tool_payload_for_markdown, try_resolve_bare_skill_prompt,
-        validate_no_args, write_mcp_server_fixture, CliAction, CliOutputFormat, CliToolExecutor,
-        GitOperation, GitWorkspaceSummary, InternalPromptProgressEvent,
-        InternalPromptProgressState, LiveCli, LocalHelpTopic, PermissionModeProvenance,
-        PromptHistoryEntry, SessionLifecycleKind, SessionLifecycleSummary, SlashCommand,
-        StatusBarData, StatusUsage, TmuxPaneSnapshot, DEFAULT_MODEL, LATEST_SESSION_REFERENCE,
-        STUB_COMMANDS,
+        status_json_value, summarize_tool_payload_for_markdown, system_prompt_with_preset,
+        try_resolve_bare_skill_prompt, validate_no_args, write_mcp_server_fixture, CliAction,
+        CliOutputFormat, CliToolExecutor, GitOperation, GitWorkspaceSummary,
+        InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, LocalHelpTopic,
+        PermissionModeProvenance, PermissionPreset, PromptHistoryEntry, SessionLifecycleKind,
+        SessionLifecycleSummary, SlashCommand, StatusBarData, StatusUsage, TmuxPaneSnapshot,
+        DEFAULT_MODEL, LATEST_SESSION_REFERENCE, STUB_COMMANDS,
     };
     use api::{ApiError, MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -15076,7 +15268,7 @@ mod tests {
             CliAction::Repl {
                 model: DEFAULT_MODEL.to_string(),
                 allowed_tools: None,
-                permission_mode: PermissionMode::WorkspaceWrite,
+                permission_preset: PermissionPreset::WorkspaceWrite,
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
@@ -15539,7 +15731,7 @@ mod tests {
             CliAction::Repl {
                 model: DEFAULT_MODEL.to_string(),
                 allowed_tools: None,
-                permission_mode: PermissionMode::ReadOnly,
+                permission_preset: PermissionPreset::ReadOnly,
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
@@ -15560,7 +15752,7 @@ mod tests {
             CliAction::Repl {
                 model: DEFAULT_MODEL.to_string(),
                 allowed_tools: None,
-                permission_mode: PermissionMode::DangerFullAccess,
+                permission_preset: PermissionPreset::BypassPermissions,
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
@@ -15617,7 +15809,7 @@ mod tests {
                         .map(str::to_string)
                         .collect()
                 ),
-                permission_mode: PermissionMode::WorkspaceWrite,
+                permission_preset: PermissionPreset::WorkspaceWrite,
                 base_commit: None,
                 reasoning_effort: None,
                 allow_broad_cwd: false,
@@ -17730,7 +17922,9 @@ mod tests {
         assert!(help.contains("/status"));
         assert!(help.contains("/sandbox"));
         assert!(help.contains("/model [model]"));
-        assert!(help.contains("/permissions [read-only|workspace-write|danger-full-access]"));
+        assert!(help.contains(
+            "/permissions [plan|auto|bypass|read-only|workspace-write|danger-full-access]"
+        ));
         assert!(help.contains("/clear [--confirm]"));
         assert!(help.contains("/cost"));
         assert!(help.contains("/resume <session-path>"));
@@ -17828,7 +18022,7 @@ mod tests {
                 "anthropic/claude-sonnet-4-6".to_string(),
                 true,
                 None,
-                PermissionMode::DangerFullAccess,
+                PermissionPreset::DangerFullAccess,
             )
             .expect("cli should initialize")
             .startup_banner()
@@ -17991,6 +18185,74 @@ mod tests {
         assert!(report.contains("read-only          ○ available Read/search tools only"));
         assert!(report.contains("workspace-write    ● current   Edit files inside the workspace"));
         assert!(report.contains("danger-full-access ○ available Unrestricted tool access"));
+        // Claude Code modes are listed alongside the legacy enforcement names.
+        assert!(report.contains(
+            "plan               ○ available Research and present a plan; no edits or commands"
+        ));
+        assert!(report.contains("acceptEdits        ○ available Auto-accept workspace edits"));
+        assert!(report.contains("bypassPermissions  ○ available Bypass all permission prompts"));
+    }
+
+    #[test]
+    fn permission_preset_maps_labels_modes_and_cycle() {
+        // Claude Code aliases resolve to the right preset…
+        assert_eq!(
+            PermissionPreset::from_label("plan"),
+            Some(PermissionPreset::Plan)
+        );
+        assert_eq!(
+            PermissionPreset::from_label("auto"),
+            Some(PermissionPreset::AcceptEdits)
+        );
+        assert_eq!(
+            PermissionPreset::from_label("bypass"),
+            Some(PermissionPreset::BypassPermissions)
+        );
+        assert_eq!(
+            PermissionPreset::from_label("default"),
+            Some(PermissionPreset::WorkspaceWrite)
+        );
+        assert_eq!(PermissionPreset::from_label("nonsense"), None);
+
+        // …and each preset enforces the expected runtime level.
+        assert_eq!(PermissionPreset::Plan.enforced(), PermissionMode::ReadOnly);
+        assert_eq!(
+            PermissionPreset::AcceptEdits.enforced(),
+            PermissionMode::WorkspaceWrite
+        );
+        assert_eq!(
+            PermissionPreset::BypassPermissions.enforced(),
+            PermissionMode::DangerFullAccess
+        );
+
+        // The Shift+Tab cycle follows Claude Code's order and is a closed loop.
+        assert_eq!(
+            PermissionPreset::WorkspaceWrite.cycle_next(),
+            PermissionPreset::AcceptEdits
+        );
+        assert_eq!(
+            PermissionPreset::AcceptEdits.cycle_next(),
+            PermissionPreset::Plan
+        );
+        assert_eq!(
+            PermissionPreset::Plan.cycle_next(),
+            PermissionPreset::BypassPermissions
+        );
+        assert_eq!(
+            PermissionPreset::BypassPermissions.cycle_next(),
+            PermissionPreset::WorkspaceWrite
+        );
+    }
+
+    #[test]
+    fn plan_preset_appends_planning_addendum_to_system_prompt() {
+        let base = vec!["base prompt".to_string()];
+        let plain = system_prompt_with_preset(&base, PermissionPreset::WorkspaceWrite);
+        assert_eq!(plain, base);
+
+        let planned = system_prompt_with_preset(&base, PermissionPreset::Plan);
+        assert_eq!(planned.len(), 2);
+        assert!(planned.last().unwrap().contains("PLAN MODE"));
     }
 
     #[test]
