@@ -57,9 +57,9 @@ pub fn run_setup_wizard() -> Result<(), Box<dyn std::error::Error>> {
     let current = load_current_provider_config();
 
     println!();
-    println!("  \x1b[1mClaw Code Setup Wizard\x1b[0m");
+    println!("  \x1b[1mJclaw Setup Wizard\x1b[0m");
     println!("  Configure your provider, API key, and model.");
-    println!("  Press Enter to keep current value.\n");
+    println!("  \x1b[2mPress Enter to keep current value · Esc to cancel.\x1b[0m\n");
 
     let kind = prompt_provider(&current)?;
     let api_key = prompt_api_key(&kind, &current)?;
@@ -326,6 +326,17 @@ pub fn ensure_provider_configured() {
     println!("  \x1b[1mNo API credentials detected.\x1b[0m");
     println!("  Set up a provider now — Anthropic or any OpenAI-compatible endpoint.");
     if let Err(error) = run_setup_wizard() {
+        // Esc/Ctrl-C is a deliberate cancel, not a crash — exit cleanly with a
+        // friendly next-step hint instead of falling through to the generic
+        // "missing Anthropic credentials" error stack.
+        if error.to_string().contains("cancelled") {
+            println!();
+            println!("  \x1b[2mSetup cancelled.\x1b[0m Jclaw needs a provider to start.");
+            println!(
+                "  Re-run and finish setup, or set an API key first — e.g. \x1b[1mANTHROPIC_API_KEY\x1b[0m or \x1b[1mOPENAI_API_KEY\x1b[0m."
+            );
+            std::process::exit(0);
+        }
         eprintln!("  Setup wizard failed: {error}");
         return;
     }
