@@ -335,7 +335,10 @@ fn main() {
         tools::allow_unrestricted_reads();
     }
     if let Err(error) = run() {
-        let message = error.to_string();
+        // Usage hints are written with the canonical `claw` name; when invoked as
+        // claw-janitor, rebrand them so "Run `claw --help`" etc. name the binary
+        // the user actually ran. No-op for `claw` (and in tests, which run `claw`).
+        let message = rebrand_cli_name_for_janitor(error.to_string());
         // When --output-format json is active, emit errors as JSON so downstream
         // tools can parse failures the same way they parse successes (ROADMAP #42).
         let argv: Vec<String> = std::env::args().collect();
@@ -417,17 +420,18 @@ fn main() {
             // #156: Add machine-readable error kind to text output so stderr observers
             // don't need to regex-scrape the prose.
             let kind = classify_error_kind(&message);
-            if message.contains("`claw --help`") {
+            if message.contains("--help`") {
                 eprintln!(
                     "[error-kind: {kind}]
 error: {message}"
                 );
             } else {
+                let cli = invoked_cli_name();
                 eprintln!(
                     "[error-kind: {kind}]
 error: {message}
 
-Run `claw --help` for usage."
+Run `{cli} --help` for usage."
                 );
             }
         }
@@ -3209,6 +3213,24 @@ fn banner_width() -> usize {
         .map(|(cols, _)| cols as usize)
         .unwrap_or(72)
         .clamp(46, 100)
+}
+
+/// Render the banner's permission value, flagging risky modes so an unattended
+/// `danger-full-access` (no approval prompts) can't hide in plain gray. Safe
+/// modes render plain; auto-approving modes are colored and annotated.
+fn permission_banner_value(mode: PermissionMode) -> String {
+    let label = mode.as_str();
+    match mode {
+        PermissionMode::DangerFullAccess => {
+            format!("\x1b[1;31m{label}\x1b[0m \x1b[2m(no approval prompts)\x1b[0m")
+        }
+        PermissionMode::Allow => {
+            format!("\x1b[33m{label}\x1b[0m \x1b[2m(auto-approves tools)\x1b[0m")
+        }
+        PermissionMode::ReadOnly | PermissionMode::WorkspaceWrite | PermissionMode::Prompt => {
+            label.to_string()
+        }
+    }
 }
 
 /// Shorten an absolute path for display by replacing the `$HOME` prefix with
@@ -7868,7 +7890,7 @@ impl LiveCli {
             rule,
             tagline,
             self.model,
-            self.permission_mode.as_str(),
+            permission_banner_value(self.permission_mode),
             cwd_display,
             self.session.id,
             session_path,
@@ -12071,6 +12093,33 @@ fn janitor_mode() -> bool {
         }
     }
     env::args().next().is_some_and(|arg0| from_name(&arg0))
+}
+
+/// The name this binary was invoked as, for usage hints: `claw-janitor` for the
+/// card-author variant, otherwise `claw`. Both share this binary, so usage
+/// strings should name whichever the user actually ran.
+fn invoked_cli_name() -> &'static str {
+    if janitor_mode() {
+        "claw-janitor"
+    } else {
+        "claw"
+    }
+}
+
+/// Rewrite `claw`-prefixed usage tokens in an error/help message to name the
+/// invoked binary. No-op unless running as claw-janitor, so `claw` output (and
+/// every test, which runs the `claw` binary) is untouched. Only whole-word
+/// `claw` command forms are rewritten — never `claw-janitor` itself (it has no
+/// trailing space after `claw`) or words like `claws`.
+fn rebrand_cli_name_for_janitor(message: String) -> String {
+    if !janitor_mode() {
+        return message;
+    }
+    message
+        .replace("`claw ", "`claw-janitor ")
+        .replace("`claw`", "`claw-janitor`")
+        .replace("Usage: claw ", "Usage: claw-janitor ")
+        .replace("or claw -p", "or claw-janitor -p")
 }
 
 fn build_system_prompt(model: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {

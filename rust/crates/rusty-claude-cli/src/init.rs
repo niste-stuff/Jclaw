@@ -15,7 +15,7 @@ const STARTER_SETTINGS_JSON: &str = concat!(
     "  }\n",
     "}\n",
 );
-const GITIGNORE_COMMENT: &str = "# Claw Code local artifacts";
+const GITIGNORE_COMMENT: &str = "# Jclaw local artifacts";
 const GITIGNORE_ENTRIES: [&str; 3] = [".claw/settings.local.json", ".claw/sessions/", ".clawhip/"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,7 +240,8 @@ pub(crate) fn render_init_claude_md(cwd: &Path) -> String {
     let mut lines = vec![
         "# CLAUDE.md".to_string(),
         String::new(),
-        "This file provides guidance to Claw Code (clawcode.dev) when working with code in this repository.".to_string(),
+        "This file provides guidance to Jclaw when working with code in this repository."
+            .to_string(),
         String::new(),
     ];
 
