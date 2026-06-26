@@ -585,9 +585,255 @@ fn read_line(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
     Ok(buffer)
 }
 
+/// Permission modes offered by the settings menu: `(menu label, config value
+/// written to `permissions.defaultMode`)`. The config values are the canonical
+/// strings the runtime accepts (see `parse_permission_mode_label`).
+const PERMISSION_MENU_MODES: &[(&str, &str)] = &[
+    (
+        "Read-only — never writes files or runs commands",
+        "read-only",
+    ),
+    (
+        "Workspace-write — edit files here, ask before shell (default)",
+        "workspace-write",
+    ),
+    (
+        "Full access — run everything, no prompts (risky)",
+        "dontAsk",
+    ),
+];
+
+/// Interactive settings hub, launched by `--config`. Loops a
+/// top-level menu so several settings can be changed in one sitting, then
+/// returns. Unlike `ensure_provider_configured`, this runs on demand even when
+/// credentials already exist.
+pub fn run_config_menu() -> Result<(), Box<dyn std::error::Error>> {
+    if !io::stdin().is_terminal() {
+        eprintln!("  --config needs an interactive terminal (a TTY).");
+        return Ok(());
+    }
+
+    apply_stored_provider_to_env();
+    println!();
+    println!("  \x1b[1mJclaw Settings\x1b[0m");
+    println!("  \x1b[2mPick a setting to change · Esc or Done to finish.\x1b[0m");
+
+    let options = vec![
+        "API provider, key & model".to_string(),
+        "Default permission mode".to_string(),
+        "Show current settings".to_string(),
+        "Done".to_string(),
+    ];
+
+    // Esc returns None and ends the hub; "Done" breaks out from inside.
+    while let Some(choice) = select_menu("Settings", &options, 0)? {
+        match choice {
+            0 => {
+                // The provider wizard cancelling (Esc) should drop back to this
+                // hub, not abort the whole menu.
+                if let Err(error) = run_setup_wizard() {
+                    if error.to_string().contains("cancelled") {
+                        println!("  \x1b[2mProvider setup cancelled — nothing changed.\x1b[0m");
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            1 => prompt_and_save_permission_mode()?,
+            2 => print_current_settings(),
+            _ => break, // "Done"
+        }
+        println!();
+    }
+
+    println!("  \x1b[2mDone.\x1b[0m");
+    Ok(())
+}
+
+/// Offer the permission-mode choices and persist the pick to the user
+/// `settings.json` as `permissions.defaultMode`. Esc leaves it unchanged.
+fn prompt_and_save_permission_mode() -> Result<(), Box<dyn std::error::Error>> {
+    let current = read_user_settings_permission_mode();
+    let labels: Vec<String> = PERMISSION_MENU_MODES
+        .iter()
+        .map(|(label, value)| {
+            if current.as_deref() == Some(*value) {
+                format!("{label}  (current)")
+            } else {
+                (*label).to_string()
+            }
+        })
+        .collect();
+    let default = PERMISSION_MENU_MODES
+        .iter()
+        .position(|(_, value)| current.as_deref() == Some(*value))
+        .unwrap_or(1);
+
+    let Some(choice) = select_menu("Default permission mode", &labels, default)? else {
+        return Ok(()); // cancelled
+    };
+    let value = PERMISSION_MENU_MODES[choice].1;
+    save_permission_default_mode(value)?;
+    println!("  Default permission mode set to \x1b[1m{value}\x1b[0m for new sessions.");
+    Ok(())
+}
+
+/// Read `permissions.defaultMode` from the user `settings.json`, if present.
+fn read_user_settings_permission_mode() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let path = std::path::Path::new(&home)
+        .join(".claw")
+        .join("settings.json");
+    let content = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    extract_permission_default_mode(&value)
+}
+
+/// Pure read of `permissions.defaultMode` from a settings value.
+fn extract_permission_default_mode(settings: &serde_json::Value) -> Option<String> {
+    settings
+        .get("permissions")?
+        .get("defaultMode")?
+        .as_str()
+        .map(ToOwned::to_owned)
+}
+
+/// Pure update: set `permissions.defaultMode` in a settings value, creating the
+/// `permissions` object if absent and resetting it if it is not an object,
+/// while preserving every other field. Disk I/O is kept out so this is unit
+/// testable.
+fn apply_permission_default_mode(
+    mut settings: serde_json::Value,
+    value: &str,
+) -> serde_json::Value {
+    if !settings.is_object() {
+        settings = serde_json::json!({});
+    }
+    let obj = settings.as_object_mut().expect("settings is an object");
+    let permissions = obj
+        .entry("permissions")
+        .or_insert_with(|| serde_json::json!({}));
+    if !permissions.is_object() {
+        *permissions = serde_json::json!({});
+    }
+    permissions
+        .as_object_mut()
+        .expect("permissions is an object")
+        .insert(
+            "defaultMode".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    settings
+}
+
+/// Write `permissions.defaultMode` into the user `settings.json`, preserving any
+/// other fields/permissions keys already there.
+fn save_permission_default_mode(value: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let home = std::env::var("HOME")?;
+    let dir = std::path::Path::new(&home).join(".claw");
+    let path = dir.join("settings.json");
+
+    let existing: serde_json::Value = if path.exists() {
+        serde_json::from_str(&std::fs::read_to_string(&path)?)?
+    } else {
+        serde_json::json!({})
+    };
+    let updated = apply_permission_default_mode(existing, value);
+
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(&path, serde_json::to_string_pretty(&updated)?)?;
+    Ok(())
+}
+
+/// Print the resolved provider/model/permission settings. The API key is shown
+/// only as configured/none — never the secret itself.
+fn print_current_settings() {
+    let cfg = load_current_provider_config();
+    let key_set = cfg.api_key().is_some_and(|k| !k.is_empty()) || has_any_credentials();
+    println!("  \x1b[1mCurrent settings\x1b[0m");
+    println!(
+        "    \x1b[2mProvider\x1b[0m     {}",
+        cfg.kind().unwrap_or("(unset)")
+    );
+    println!(
+        "    \x1b[2mModel\x1b[0m        {}",
+        cfg.model().unwrap_or("(unset)")
+    );
+    if let Some(url) = cfg.base_url() {
+        if !url.trim().is_empty() {
+            println!("    \x1b[2mBase URL\x1b[0m     {url}");
+        }
+    }
+    println!(
+        "    \x1b[2mAPI key\x1b[0m      {}",
+        if key_set { "configured" } else { "(none)" }
+    );
+    println!(
+        "    \x1b[2mPermissions\x1b[0m  {}",
+        read_user_settings_permission_mode()
+            .unwrap_or_else(|| "workspace-write (default)".to_string())
+    );
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{force_custom_openai_routing, provider_env_vars, CREDENTIAL_ENV_VARS};
+    use super::{
+        apply_permission_default_mode, extract_permission_default_mode,
+        force_custom_openai_routing, provider_env_vars, CREDENTIAL_ENV_VARS, PERMISSION_MENU_MODES,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn permission_default_mode_round_trips() {
+        let settings = apply_permission_default_mode(json!({}), "read-only");
+        assert_eq!(
+            extract_permission_default_mode(&settings).as_deref(),
+            Some("read-only")
+        );
+    }
+
+    #[test]
+    fn permission_default_mode_preserves_other_fields() {
+        let start = json!({
+            "model": "anthropic/opus",
+            "permissions": { "allow": ["Read"] }
+        });
+        let updated = apply_permission_default_mode(start, "dontAsk");
+        // Existing top-level field and sibling permissions key survive.
+        assert_eq!(updated["model"], json!("anthropic/opus"));
+        assert_eq!(updated["permissions"]["allow"], json!(["Read"]));
+        assert_eq!(updated["permissions"]["defaultMode"], json!("dontAsk"));
+    }
+
+    #[test]
+    fn permission_default_mode_resets_non_object_permissions() {
+        // A malformed `permissions` value must not panic or be left invalid.
+        let updated =
+            apply_permission_default_mode(json!({ "permissions": "oops" }), "workspace-write");
+        assert_eq!(
+            extract_permission_default_mode(&updated).as_deref(),
+            Some("workspace-write")
+        );
+    }
+
+    #[test]
+    fn extract_returns_none_when_absent() {
+        assert_eq!(extract_permission_default_mode(&json!({})), None);
+        assert_eq!(
+            extract_permission_default_mode(&json!({ "permissions": {} })),
+            None
+        );
+    }
+
+    #[test]
+    fn menu_permission_values_are_canonical_config_strings() {
+        // The values written to permissions.defaultMode must be ones the runtime
+        // accepts (see parse_permission_mode_label in runtime::config).
+        let valid = ["read-only", "workspace-write", "dontAsk"];
+        for (_, value) in PERMISSION_MENU_MODES {
+            assert!(valid.contains(value), "unexpected mode value: {value}");
+        }
+    }
 
     #[test]
     fn custom_openai_endpoint_forces_local_routing_prefix() {

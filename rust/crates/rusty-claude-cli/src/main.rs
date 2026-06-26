@@ -292,6 +292,7 @@ const CLI_OPTION_SUGGESTIONS: &[&str] = &[
     "-h",
     "--version",
     "-V",
+    "--config",
     "--model",
     "--output-format",
     "--permission-mode",
@@ -1107,6 +1108,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::State { output_format } => run_worker_state(output_format)?,
         CliAction::Init { output_format } => run_init(output_format)?,
         CliAction::Setup { output_format: _ } => run_setup()?,
+        CliAction::ConfigMenu => setup_wizard::run_config_menu()?,
         // #146: dispatch pure-local introspection. Text mode uses existing
         // render_config_report/render_diff_report; JSON mode uses the
         // corresponding _json helpers already exposed for resume sessions.
@@ -1253,6 +1255,9 @@ enum CliAction {
     Setup {
         output_format: CliOutputFormat,
     },
+    /// `--config`: interactive settings hub (provider/API, model, default
+    /// permission mode). Distinct from the read-only `config` subcommand.
+    ConfigMenu,
     // #146: `claw config` and `claw diff` are pure-local read-only
     // introspection commands; wire them as standalone CLI subcommands.
     Config {
@@ -1501,6 +1506,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut permission_mode_override = None;
     let mut wants_help = false;
     let mut wants_version = false;
+    let mut wants_config = false;
     let mut allowed_tool_values = Vec::new();
     let mut compact = false;
     let mut base_commit: Option<String> = None;
@@ -1537,6 +1543,10 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             }
             "--version" | "-V" => {
                 wants_version = true;
+                index += 1;
+            }
+            "--config" => {
+                wants_config = true;
                 index += 1;
             }
             "--model" => {
@@ -1814,6 +1824,10 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
 
     if wants_version {
         return Ok(CliAction::Version { output_format });
+    }
+
+    if wants_config {
+        return Ok(CliAction::ConfigMenu);
     }
 
     let allowed_tools = normalize_allowed_tools(&allowed_tool_values)?;
@@ -14419,6 +14433,10 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(
         out,
         "  --version, -V              Print version and build information locally"
+    )?;
+    writeln!(
+        out,
+        "  --config                   Open the interactive settings menu (provider/API key, model, default permission mode)"
     )?;
     writeln!(out)?;
     writeln!(out, "Interactive slash commands:")?;
