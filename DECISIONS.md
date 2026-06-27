@@ -82,23 +82,24 @@ Verified 2026-06-24 against:
 
 ### Schema targeted by `validate_card`
 
-SillyTavern V2-style JSON object that Janitor imports/exports:
+Markdown card file with `# Section` headers and `---` section separators:
 
-| Field | Required | Notes |
+| Section | Required | Notes |
 |---|---|---|
-| `name` | yes | display/chat name |
-| `personality` | yes | bulk of definition; permanent tokens |
-| `first_mes` | yes | opening message |
-| `tags` | yes (1–10) | discovery tags |
-| `description` | no | user-facing bio; **excluded** from token budget |
-| `scenario` | no | setting/situation |
-| `mes_example` | no (recommended) | example dialogue turns |
+| `Name` | yes | display name |
+| `Personality` | yes | bulk of definition; permanent tokens |
+| `Opening Messages` | yes (1–10) | individual messages separated by `---` |
+| `Description` | no | user-facing bio; **excluded** from token budget |
+| `Scenario` | no | flexible: rules, setting, or omitted |
+| `Example Messages` | no (recommended) | example dialogue turns |
+
+Each card is saved as `<slug>.md` (e.g. `aria-nightingale.md`).
 
 ### Token budget thresholds (`token_budget_check`)
 
-- `personality`: warn > 1500, flag > 2000 estimated tokens.
-- permanent (`personality` + `scenario` + `mes_example`): flag > 2500.
-- `description` is reported but excluded (not sent to the model).
+- `Personality`: warn > 1500, flag > 2000 estimated tokens.
+- permanent (`Personality` + `Scenario` + `Example Messages`): flag > 2500.
+- `Description` is reported but excluded (not sent to the model).
 - Estimate method: ~4 chars/token heuristic (phase 1; not a model tokenizer) —
   labeled as an estimate in the tool output.
 
@@ -123,7 +124,7 @@ SillyTavern V2-style JSON object that Janitor imports/exports:
   existing `SystemPromptBuilder::with_output_style` extension point rather than
   editing the shared hardcoded intro string.
 - **Loop is agent-driven** (system-prompt instructed self-critique), and the
-  canonical output format is **JSON (SillyTavern V2-style)**.
+  canonical output format is **Markdown** (`# Section` + `---` separators).
 
 ---
 
@@ -138,10 +139,10 @@ references, drafts, saves, and edits cards as files.
 1. **Is a file treated as source code?** No blocking assumptions on the
    card-editing path:
    - `edit_file` (`runtime/file_ops.rs:268`) is a plain `old_string → new_string`
-     text replace with a line-based patch — language-agnostic, fine on `.json`.
+     text replace with a line-based patch — language-agnostic, fine on `.md`.
    - Tool-result rendering (`format_structured_patch_preview`, `main.rs`) is a
      line diff; syntax highlighting (`render.rs:569`) keys off the fenced
-     code-block token and falls back to plain text for unknown languages. JSON
+     code-block token and falls back to plain text for unknown languages. Markdown
      has a syntect syntax; worst case is plain text. No choke.
    - The only code-oriented features — `claw diff` (runs `git diff`) and
      `claw init` (language detection) — are separate subcommands not on the
@@ -201,14 +202,14 @@ verify manually:
 ```
 mkdir /tmp/cards && cd /tmp/cards
 ANTHROPIC_API_KEY=... <repo>/rust/target/debug/claw-janitor "a shy bookshop owner"
-ls /tmp/cards          # expect a <slug>.json saved here
+ls /tmp/cards          # expect a <slug>.md saved here
 # reference: point it at another folder of cards and ask it to match a style;
 #   it should cite the file(s) it read.
 # edit: ask it to change one saved card; confirm only that file changed.
 # clarify: give a vague prompt ("make a card") and confirm it asks first.
 ```
 A write outside the workspace can be confirmed denied by asking it to save to an
-absolute path like `/tmp/outside.json` — the file-op boundary refuses it.
+absolute path like `/tmp/outside.md` — the file-op boundary refuses it.
 
 # Phase 3 — full coding-agent surface, authoring alongside the user
 
@@ -227,8 +228,8 @@ includes them). The persona (`JANITOR_STYLE_PROMPT`), not a whitelist, keeps the
 agent on task — same way the `claw` persona keeps a general agent on engineering.
 
 Why: the whitelist made the agent shallow — it could only emit a card, not *work*
-on cards the way an engineer works on a repo (grep across cards, `jq`/`bash` to
-audit JSON, iterate on edits with the user). The user wanted it to author cards
+on cards the way an engineer works on a repo (grep across cards, `bash` to
+audit, iterate on edits with the user). The user wanted it to author cards
 ALONGSIDE them: propose, edit in place, take feedback, use references, repeat.
 
 ## Safety is unchanged (not regressed by adding `bash`)
@@ -245,7 +246,7 @@ ALONGSIDE them: propose, edit in place, take feedback, use references, repeat.
 ## Persona rewrite
 
 `JANITOR_STYLE_PROMPT` changed from "you do not run shell / do this, then stop"
-to a collaborator that uses the full toolset (`bash`/`jq`/`git`, grep/glob, web,
+to a collaborator that uses the full toolset (`bash`/`cat`/`grep`, grep/glob, web,
 file edits) and works iteratively WITH the user, while keeping the card schema,
 `{{char}}`/`{{user}}` conventions, token budget, and the validate/budget quality
 loop.
