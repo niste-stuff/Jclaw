@@ -7429,6 +7429,13 @@ fn run_repl(
             input::ReadOutcome::CyclePermissionMode => {
                 cli.cycle_permission_mode()?;
                 cli.persist_session()?;
+                // Repaint in place: erase the input box we just drew (4 box
+                // lines + the accepted prompt line) so Shift+Tab updates the
+                // mode footer live instead of pushing a new box each press.
+                if io::stdout().is_terminal() {
+                    print!("\x1b[5F\x1b[J");
+                    let _ = io::stdout().flush();
+                }
             }
             input::ReadOutcome::Submit(input) => {
                 let trimmed = input.trim().to_string();
@@ -8939,16 +8946,13 @@ impl LiveCli {
         self.replace_runtime(runtime)
     }
 
-    /// Advance to the next preset in the Shift+Tab cycle and announce the switch.
+    /// Advance to the next preset in the Shift+Tab cycle. Unlike the explicit
+    /// `/permissions <mode>` command, this prints nothing: the input box's mode
+    /// footer is repainted in place by the REPL loop, so rapid cycling doesn't
+    /// stack confirmation reports in the scrollback.
     fn cycle_permission_mode(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let previous = self.permission_preset.canonical().to_string();
         let next = self.permission_preset.cycle_next();
-        self.apply_permission_preset(next)?;
-        println!(
-            "{}",
-            format_permissions_switch_report(&previous, next.canonical())
-        );
-        Ok(())
+        self.apply_permission_preset(next)
     }
 
     /// Claude-Code-style mode footer: the active preset plus the Shift+Tab hint,
