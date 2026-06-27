@@ -743,7 +743,11 @@ When changing a card that already exists:
 - Example dialogue uses turn lines like `{{char}}: ...` and `{{user}}: ...`.
 
 ## Budget
-- Keep `Personality` under ~2000 estimated tokens (ideal 200-1500). Keep permanent definition (`Personality` + `Scenario` + `Example Messages`) under ~2500. Oversized cards degrade chat memory.
+There is no hard token limit on card size. Use these quality bands as guidance:
+- **0-1k estimated tokens** — low quality; avoid unless the user explicitly wants a short card.
+- **2k-4k estimated tokens** — the sweet spot; aim for this range.
+- **Above 5k estimated tokens** — too much for most use cases; avoid unless the user explicitly requests a verbose card.
+Keep permanent definition (`Personality` + `Scenario` + `Example Messages`) in proportion — if it exceeds ~5k tokens, consider whether every section earns its place.
 
 ## Clarify when it matters
 If the request lacks detail that would materially change the card — genre/setting, the character's core concept or role, relationship to `{{user}}`, intended tone (wholesome vs. dark), or SFW/NSFW intent — ask 1-3 focused questions before investing in a full draft. Ask only what you genuinely cannot reasonably default; if the request is clear, don't stall — start drafting and refine with the user.

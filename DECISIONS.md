@@ -97,9 +97,12 @@ Each card is saved as `<slug>.md` (e.g. `aria-nightingale.md`).
 
 ### Token budget thresholds (`token_budget_check`)
 
-- `Personality`: warn > 1500, flag > 2000 estimated tokens.
-- permanent (`Personality` + `Scenario` + `Example Messages`): flag > 2500.
-- `Description` is reported but excluded (not sent to the model).
+No hard limits. Quality bands:
+- `Personality` < 1k tokens: flagged as low quality (avoid unless user wants short).
+- `Personality` 2k-4k tokens: sweet spot (aim for this).
+- `Personality` > 5k tokens: flagged as too much (avoid unless user requests verbose).
+- Permanent (`Personality` + `Scenario` + `Example Messages`) > 5k: flagged as above ideal range; > 6k flagged as excessive.
+- `Description` is reported but excluded (not sent to the model, no token budget impact).
 - Estimate method: ~4 chars/token heuristic (phase 1; not a model tokenizer) —
   labeled as an estimate in the tool output.
 

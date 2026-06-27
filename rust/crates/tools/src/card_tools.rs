@@ -49,12 +49,16 @@ const REQUIRED_SECTIONS: &[&str] = &[SECTION_NAME, SECTION_PERSONALITY, SECTION_
 const OPTIONAL_SECTIONS: &[&str] =
     &[SECTION_DESCRIPTION, SECTION_SCENARIO, SECTION_EXAMPLE_MESSAGES];
 
-/// Personality should stay under this many estimated tokens (hard max).
-const PERSONALITY_MAX_TOKENS: usize = 2000;
-/// Permanent (always-in-context) definition tokens should stay under this.
-const PERMANENT_MAX_TOKENS: usize = 2500;
-/// Soft warning threshold for the personality section.
-const PERSONALITY_WARN_TOKENS: usize = 1500;
+/// Personality under this many estimated tokens suggests low-quality definition.
+const PERSONALITY_LOW_QUALITY: usize = 1000;
+/// Personality in the 1k-4k range is the sweet spot — aim for this.
+const PERSONALITY_TARGET_MAX: usize = 4000;
+/// Personality over this is too much for most use cases; avoid unless user asks.
+const PERSONALITY_TOO_MUCH: usize = 5000;
+/// Permanent definition (personality+scenario+example) sweet spot upper bound.
+const PERMANENT_TARGET_MAX: usize = 5000;
+/// Permanent definition over this is excessive; avoid unless user asks.
+const PERMANENT_TOO_MUCH: usize = 6000;
 /// Max opening messages.
 const OPENING_MESSAGES_MAX: usize = 10;
 /// Min opening messages.
@@ -407,18 +411,31 @@ pub fn token_budget_check(input: &Value) -> Result<String, String> {
     let permanent = personality_tokens + scenario_tokens + example_tokens;
 
     let mut flags: Vec<String> = Vec::new();
-    if personality_tokens > PERSONALITY_MAX_TOKENS {
+    // Quality bands: 0-1k low, 1k-4k sweet spot, 4k-5k above ideal, >5k too much
+    if personality_tokens < PERSONALITY_LOW_QUALITY {
         flags.push(format!(
-            "personality ~{personality_tokens} tokens exceeds hard max {PERSONALITY_MAX_TOKENS}; trim it"
+            "personality ~{personality_tokens} tokens is low quality; avoid unless the user explicitly wants a short card"
         ));
-    } else if personality_tokens > PERSONALITY_WARN_TOKENS {
+    } else if personality_tokens > PERSONALITY_TOO_MUCH {
         flags.push(format!(
-            "personality ~{personality_tokens} tokens is above the recommended {PERSONALITY_WARN_TOKENS}; consider trimming"
+            "personality ~{personality_tokens} tokens is too much for most use cases; avoid unless the user explicitly requests a verbose card. Aim for 2k-4k tokens"
+        ));
+    } else if personality_tokens > PERSONALITY_TARGET_MAX {
+        flags.push(format!(
+            "personality ~{personality_tokens} tokens is above the ideal 2k-4k range; consider trimming unless the card needs the detail"
         ));
     }
-    if permanent > PERMANENT_MAX_TOKENS {
+    if permanent < PERSONALITY_LOW_QUALITY {
         flags.push(format!(
-            "permanent tokens ~{permanent} (personality+scenario+example messages) exceeds {PERMANENT_MAX_TOKENS}; memory may degrade"
+            "permanent definition (personality+scenario+example messages) is ~{permanent} tokens — low quality; avoid unless the user wants minimal cards"
+        ));
+    } else if permanent > PERMANENT_TOO_MUCH {
+        flags.push(format!(
+            "permanent definition (personality+scenario+example messages) is ~{permanent} tokens — excessive for most use cases; avoid unless the user explicitly requests it"
+        ));
+    } else if permanent > PERMANENT_TARGET_MAX {
+        flags.push(format!(
+            "permanent definition (personality+scenario+example messages) is ~{permanent} tokens — above the ideal range; consider trimming"
         ));
     }
 
@@ -435,9 +452,11 @@ pub fn token_budget_check(input: &Value) -> Result<String, String> {
         },
         "permanent_tokens": permanent,
         "limits": {
-            "personality_max": PERSONALITY_MAX_TOKENS,
-            "personality_warn": PERSONALITY_WARN_TOKENS,
-            "permanent_max": PERMANENT_MAX_TOKENS,
+            "personality_low_quality": PERSONALITY_LOW_QUALITY,
+            "personality_target_max": PERSONALITY_TARGET_MAX,
+            "personality_too_much": PERSONALITY_TOO_MUCH,
+            "permanent_target_max": PERMANENT_TARGET_MAX,
+            "permanent_too_much": PERMANENT_TOO_MUCH,
         },
         "flags": flags,
     });
@@ -655,7 +674,7 @@ hi";
 
     #[test]
     fn token_budget_flags_oversized_personality() {
-        let big = "word ".repeat(3000);
+        let big = "word ".repeat(5000); // ~6250 est tokens, above 5k too-much threshold
         let text = format!(
             "# Name
 X
@@ -678,12 +697,42 @@ hi"
             .as_array()
             .unwrap()
             .iter()
-            .any(|f| f.as_str().unwrap().contains("hard max")));
+            .any(|f| f.as_str().unwrap().contains("too much")));
     }
 
     #[test]
     fn token_budget_passes_small_card() {
         let input = json!({ "card": good_card_text() });
+        let out = token_budget_check(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        // Small cards are flagged as low quality under the new guidance
+        assert_eq!(v["within_budget"], json!(false), "report: {out}");
+        assert!(v["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f.as_str().unwrap().contains("low quality")));
+    }
+
+    #[test]
+    fn token_budget_passes_medium_card() {
+        // A medium-sized personality (1000-4000 tokens) should pass cleanly
+        let medium = "This character has a detailed personality that spans multiple facets. ".repeat(100);
+        let text = format!(
+            "# Name
+X
+
+---
+
+# Personality
+{medium}
+
+---
+
+# Opening Messages
+Hello there."
+        );
+        let input = json!({ "card": text });
         let out = token_budget_check(&input).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["within_budget"], json!(true), "report: {out}");
@@ -693,6 +742,8 @@ hi"
     fn token_budget_excludes_description() {
         // Description is public-facing and should not count toward permanent
         let big = "word ".repeat(3000);
+        // Personality needs to be >1000 tokens to avoid low-quality flag
+        let medium_personality = "This character is defined by a rich inner world and complex motivations. ".repeat(80);
         let text = format!(
             "# Name
 X
@@ -705,7 +756,7 @@ X
 ---
 
 # Personality
-small
+{medium_personality}
 
 ---
 
@@ -799,6 +850,8 @@ Three.";
     #[test]
     fn description_excluded_from_permanent_budget() {
         let desc = "word ".repeat(2000); // ~2000 chars, ~500 tokens
+        // Personality needs to be >1000 tokens to avoid low-quality flag
+        let med = "X is a friendly character with a warm personality and a great sense of humor. ".repeat(60);
         let text = format!(
             "# Name
 X
@@ -811,7 +864,7 @@ X
 ---
 
 # Personality
-X is friendly.
+{med}
 
 ---
 
