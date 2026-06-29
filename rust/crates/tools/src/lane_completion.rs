@@ -25,7 +25,6 @@ pub(crate) fn detect_lane_completion(
     test_green: bool,
     has_pushed: bool,
 ) -> Option<LaneContext> {
-    // Must be finished without errors
     if output.error.is_some() {
         return None;
     }

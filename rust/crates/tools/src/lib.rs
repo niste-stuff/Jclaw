@@ -1371,21 +1371,29 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "validate_card",
-            description: "Validate a Janitor AI character card against the card schema. Pass the card as a JSON object under `card` (or the fields at top level): name, description, personality, scenario, first_mes, mes_example, tags. Returns a JSON report with `valid`, `errors`, `warnings`.",
+            description: "Validate a Janitor AI character card against the card schema. Pass the card either as a JSON object under `card` (fields: name, description, personality, scenario, first_mes, mes_example, tags) or as a Markdown string under `card` with `# Name` / `# Personality` / `# Opening Messages` sections separated by `---`. Returns a JSON report with `valid`, `errors`, `warnings`.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "card": {
-                        "type": "object",
-                        "properties": {
-                            "name": { "type": "string" },
-                            "description": { "type": "string" },
-                            "personality": { "type": "string" },
-                            "scenario": { "type": "string" },
-                            "first_mes": { "type": "string" },
-                            "mes_example": { "type": "string" },
-                            "tags": { "type": "array", "items": { "type": "string" } }
-                        }
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string" },
+                                    "description": { "type": "string" },
+                                    "personality": { "type": "string" },
+                                    "scenario": { "type": "string" },
+                                    "first_mes": { "type": ["string", "array"] },
+                                    "mes_example": { "type": "string" },
+                                    "tags": { "type": "array", "items": { "type": "string" } }
+                                }
+                            },
+                            {
+                                "type": "string",
+                                "description": "Markdown card text with `# Section` headers separated by `---`."
+                            }
+                        ]
                     }
                 },
                 "required": ["card"],
@@ -1400,16 +1408,24 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "type": "object",
                 "properties": {
                     "card": {
-                        "type": "object",
-                        "properties": {
-                            "name": { "type": "string" },
-                            "description": { "type": "string" },
-                            "personality": { "type": "string" },
-                            "scenario": { "type": "string" },
-                            "first_mes": { "type": "string" },
-                            "mes_example": { "type": "string" },
-                            "tags": { "type": "array", "items": { "type": "string" } }
-                        }
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string" },
+                                    "description": { "type": "string" },
+                                    "personality": { "type": "string" },
+                                    "scenario": { "type": "string" },
+                                    "first_mes": { "type": ["string", "array"] },
+                                    "mes_example": { "type": "string" },
+                                    "tags": { "type": "array", "items": { "type": "string" } }
+                                }
+                            },
+                            {
+                                "type": "string",
+                                "description": "Markdown card text with `# Section` headers separated by `---`."
+                            }
+                        ]
                     }
                 },
                 "required": ["card"],

@@ -46,8 +46,11 @@ const SECTION_EXAMPLE_MESSAGES: &str = "example_messages";
 const REQUIRED_SECTIONS: &[&str] = &[SECTION_NAME, SECTION_PERSONALITY, SECTION_OPENING_MESSAGES];
 
 /// Optional but recognized sections.
-const OPTIONAL_SECTIONS: &[&str] =
-    &[SECTION_DESCRIPTION, SECTION_SCENARIO, SECTION_EXAMPLE_MESSAGES];
+const OPTIONAL_SECTIONS: &[&str] = &[
+    SECTION_DESCRIPTION,
+    SECTION_SCENARIO,
+    SECTION_EXAMPLE_MESSAGES,
+];
 
 /// Personality under this many estimated tokens suggests low-quality definition.
 const PERSONALITY_LOW_QUALITY: usize = 1000;
@@ -124,11 +127,7 @@ fn parse_sections(text: &str) -> Vec<CardSection> {
                 current_lines.clear();
             }
             // Start new section
-            current_header = Some(
-                line.trim_start_matches('#')
-                    .trim()
-                    .to_string(),
-            );
+            current_header = Some(line.trim_start_matches('#').trim().to_string());
         } else if current_header.is_some() {
             current_lines.push(line.to_string());
         }
@@ -163,19 +162,12 @@ fn clean_section_body(raw: &str) -> String {
         end -= 1;
     }
 
-    let body_lines: Vec<&str> = lines[start..end]
-        .iter()
-        .map(|l| l.trim_end())
-        .collect();
+    let body_lines: Vec<&str> = lines[start..end].iter().map(|l| l.trim_end()).collect();
     body_lines.join("\n").trim().to_string()
 }
 
 /// Build a CardSection from a header and cleaned body.
-fn build_section(
-    header: &str,
-    body: &str,
-    known: &[(String, &str)],
-) -> CardSection {
+fn build_section(header: &str, body: &str, known: &[(String, &str)]) -> CardSection {
     let slug = normalise_header(header);
     let recognised = known.iter().any(|(k, _)| k == &slug);
 
@@ -238,10 +230,8 @@ pub fn validate_card(input: &Value) -> Result<String, String> {
     let mut warnings: Vec<String> = Vec::new();
 
     // Build lookup by slug
-    let section_map: std::collections::HashMap<String, &CardSection> = sections
-        .iter()
-        .map(|s| (s.slug.clone(), s))
-        .collect();
+    let section_map: std::collections::HashMap<String, &CardSection> =
+        sections.iter().map(|s| (s.slug.clone(), s)).collect();
 
     // Check required sections
     for slug in REQUIRED_SECTIONS {
@@ -280,7 +270,9 @@ pub fn validate_card(input: &Value) -> Result<String, String> {
 
     // Warn about missing optional sections
     for slug in OPTIONAL_SECTIONS {
-        if !section_map.contains_key(*slug) || section_map.get(*slug).map_or(true, |s| s.body.is_empty()) {
+        if !section_map.contains_key(*slug)
+            || section_map.get(*slug).is_none_or(|s| s.body.is_empty())
+        {
             let name = known_sections()
                 .iter()
                 .find(|(k, _)| k == slug)
@@ -330,29 +322,119 @@ pub fn validate_card(input: &Value) -> Result<String, String> {
     Ok(report.to_string())
 }
 
-/// Extract input text from either `{"card": "..."}` (legacy compat) or raw
-/// string value.
+/// Extract the card's Markdown text from a tool input.
+///
+/// Accepts every shape the tool schema advertises:
+/// - a Markdown string (`"# Name\n..."`), with or without a `card` wrapper;
+/// - a structured object under `card` (`{"card": {"name": ..., "personality":
+///   ...}}`), which is assembled into Markdown;
+/// - the same fields at the top level (no `card` wrapper).
 fn extract_text_input(input: &Value) -> Result<String, String> {
-    // Check for a `card` wrapping key (legacy shape)
-    if let Some(card) = input.get("card") {
-        if let Some(text) = card.as_str() {
-            return Ok(text.to_string());
-        }
-    }
-    // Try direct string
-    if let Some(text) = input.as_str() {
+    // Unwrap a `card` wrapper if present; otherwise treat the input itself as
+    // the card payload (supports fields at the top level).
+    let payload = input.get("card").unwrap_or(input);
+
+    // Markdown string form (the parser's native format).
+    if let Some(text) = payload.as_str() {
         return Ok(text.to_string());
     }
-    // Fallback: serialise the Value to string (allow raw JSON compat for tests)
-    if let Some(obj) = input.as_object() {
-        // If it has markdown-style section headers, treat as string
-        if obj.contains_key("card") {
-            if let Some(inner) = obj.get("card").and_then(Value::as_str) {
-                return Ok(inner.to_string());
+
+    // Structured object form (the shape the tool schema declares): assemble
+    // Markdown from recognised fields.
+    if let Some(obj) = payload.as_object() {
+        if let Some(text) = assemble_markdown_from_object(obj) {
+            return Ok(text);
+        }
+        return Err(
+            "`card` object had no recognised fields. Provide one or more of: \
+             name, description, personality, scenario, first_mes (opening messages), \
+             mes_example (example messages) — or pass the card as a single Markdown \
+             string with `# Section` headers."
+                .to_string(),
+        );
+    }
+
+    Err(
+        "`card` must be either a Markdown string (with `# Name`, `# Personality`, and \
+         `# Opening Messages` sections) or a JSON object with card fields \
+         (name, personality, first_mes, ...)."
+            .to_string(),
+    )
+}
+
+/// Map a structured object field name (already slug-normalised) to its canonical
+/// card section header. Accepts both the SillyTavern/Janitor field names exposed
+/// by the tool schema (`first_mes`, `mes_example`) and the Markdown section slugs
+/// (`opening_messages`, `example_messages`). Returns `None` for fields with no
+/// card section (e.g. `tags`).
+fn object_key_to_header(slug: &str) -> Option<&'static str> {
+    match slug {
+        "name" => Some("Name"),
+        "description" => Some("Description"),
+        "personality" => Some("Personality"),
+        "scenario" => Some("Scenario"),
+        "first_mes" | "opening_messages" | "opening_message" => Some("Opening Messages"),
+        "mes_example" | "example_messages" | "example_message" => Some("Example Messages"),
+        _ => None,
+    }
+}
+
+/// Canonical section order for assembled Markdown.
+const ASSEMBLY_ORDER: &[&str] = &[
+    "Name",
+    "Description",
+    "Personality",
+    "Scenario",
+    "Opening Messages",
+    "Example Messages",
+];
+
+/// Render a single field value to body text. Strings pass through; arrays are
+/// joined — Opening Messages elements become separate messages (`---` between),
+/// everything else joins by newline.
+fn render_field_value(header: &str, value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Array(items) => {
+            let parts: Vec<String> = items
+                .iter()
+                .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string))
+                .filter(|p| !p.trim().is_empty())
+                .collect();
+            if header == "Opening Messages" {
+                parts.join("\n\n---\n\n")
+            } else {
+                parts.join("\n")
             }
         }
+        Value::Null => String::new(),
+        other => other.to_string(),
     }
-    Err("expected a string containing Markdown card text, or a `card` key containing one".to_string())
+}
+
+/// Assemble Markdown card text from a structured field object. Returns `None`
+/// when no recognised, non-empty fields are present.
+fn assemble_markdown_from_object(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    let mut by_header: std::collections::HashMap<&'static str, String> =
+        std::collections::HashMap::new();
+    for (key, value) in obj {
+        let Some(header) = object_key_to_header(&normalise_header(key)) else {
+            continue;
+        };
+        let rendered = render_field_value(header, value);
+        if rendered.trim().is_empty() {
+            continue;
+        }
+        by_header.insert(header, rendered);
+    }
+    if by_header.is_empty() {
+        return None;
+    }
+    let blocks: Vec<String> = ASSEMBLY_ORDER
+        .iter()
+        .filter_map(|h| by_header.get(h).map(|body| format!("# {h}\n{body}")))
+        .collect();
+    Some(blocks.join("\n\n---\n\n"))
 }
 
 fn check_placeholders(text: &str, warnings: &mut Vec<String>) {
@@ -385,10 +467,8 @@ fn check_placeholders(text: &str, warnings: &mut Vec<String>) {
 pub fn token_budget_check(input: &Value) -> Result<String, String> {
     let text = extract_text_input(input)?;
     let sections = parse_sections(&text);
-    let section_map: std::collections::HashMap<String, &CardSection> = sections
-        .iter()
-        .map(|s| (s.slug.clone(), s))
-        .collect();
+    let section_map: std::collections::HashMap<String, &CardSection> =
+        sections.iter().map(|s| (s.slug.clone(), s)).collect();
 
     let personality_tokens = section_map
         .get(SECTION_PERSONALITY)
@@ -551,11 +631,11 @@ hi";
         let out = validate_card(&input).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["valid"], json!(false));
-        assert!(v["errors"]
-            .as_array()
+        assert!(v["errors"].as_array().unwrap().iter().any(|e| e
+            .as_str()
             .unwrap()
-            .iter()
-            .any(|e| e.as_str().unwrap().to_lowercase().contains("name")));
+            .to_lowercase()
+            .contains("name")));
     }
 
     #[test]
@@ -571,11 +651,11 @@ hi";
         let out = validate_card(&input).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["valid"], json!(false));
-        assert!(v["errors"]
-            .as_array()
+        assert!(v["errors"].as_array().unwrap().iter().any(|e| e
+            .as_str()
             .unwrap()
-            .iter()
-            .any(|e| e.as_str().unwrap().to_lowercase().contains("personality")));
+            .to_lowercase()
+            .contains("personality")));
     }
 
     #[test]
@@ -610,7 +690,8 @@ p
 ---
 
 # Opening Messages
-msg1".to_string();
+msg1"
+            .to_string();
         for i in 2..=12 {
             body.push_str(&format!("\n\n---\n\nmsg{i}"));
         }
@@ -618,11 +699,11 @@ msg1".to_string();
         let out = validate_card(&input).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["valid"], json!(false));
-        assert!(v["errors"]
-            .as_array()
+        assert!(v["errors"].as_array().unwrap().iter().any(|e| e
+            .as_str()
             .unwrap()
-            .iter()
-            .any(|e| e.as_str().unwrap().to_lowercase().contains("max")));
+            .to_lowercase()
+            .contains("max")));
     }
 
     #[test]
@@ -717,7 +798,8 @@ hi"
     #[test]
     fn token_budget_passes_medium_card() {
         // A medium-sized personality (1000-4000 tokens) should pass cleanly
-        let medium = "This character has a detailed personality that spans multiple facets. ".repeat(100);
+        let medium =
+            "This character has a detailed personality that spans multiple facets. ".repeat(100);
         let text = format!(
             "# Name
 X
@@ -743,7 +825,8 @@ Hello there."
         // Description is public-facing and should not count toward permanent
         let big = "word ".repeat(3000);
         // Personality needs to be >1000 tokens to avoid low-quality flag
-        let medium_personality = "This character is defined by a rich inner world and complex motivations. ".repeat(80);
+        let medium_personality =
+            "This character is defined by a rich inner world and complex motivations. ".repeat(80);
         let text = format!(
             "# Name
 X
@@ -819,6 +902,74 @@ hi";
     }
 
     #[test]
+    fn structured_object_card_validates() {
+        // The shape the tool schema advertises (and the shape the model first
+        // reached for in practice): a JSON object under `card`, using the
+        // SillyTavern field names first_mes / mes_example.
+        let input = json!({
+            "card": {
+                "name": "Akira",
+                "description": "A kuudere childhood friend.",
+                "personality": "{{char}} is cold on the surface but deeply caring.",
+                "scenario": "{{user}} transfers into {{char}}'s class.",
+                "first_mes": "{{char}} glances up, expression unreadable.",
+                "mes_example": "{{char}}: ...Hello."
+            }
+        });
+        let out = validate_card(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true), "report: {out}");
+        assert_eq!(v["errors"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn structured_fields_at_top_level_validate() {
+        // Same fields without the `card` wrapper.
+        let input = json!({
+            "name": "Akira",
+            "personality": "{{char}} keeps everyone at arm's length.",
+            "first_mes": "{{char}} says nothing."
+        });
+        let out = validate_card(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true), "report: {out}");
+    }
+
+    #[test]
+    fn structured_opening_messages_array_splits() {
+        let input = json!({
+            "card": {
+                "name": "Akira",
+                "personality": "{{char}} is quiet.",
+                "first_mes": ["First opening.", "Second opening."]
+            }
+        });
+        let out = validate_card(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true), "report: {out}");
+        assert_eq!(v["opening_message_count"], json!(2));
+    }
+
+    #[test]
+    fn empty_object_card_errors_helpfully() {
+        let err = validate_card(&json!({ "card": {} })).unwrap_err();
+        assert!(err.contains("recognised fields"), "got: {err}");
+    }
+
+    #[test]
+    fn token_budget_accepts_structured_object() {
+        // token_budget_check shares extract_text_input, so it must accept the
+        // structured object form too.
+        let big = "This character has rich, layered motivations. ".repeat(120);
+        let input = json!({
+            "card": { "name": "Akira", "personality": big, "first_mes": "hi" }
+        });
+        let out = token_budget_check(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(v["per_section_tokens"]["personality"].as_u64().unwrap() > 1000);
+    }
+
+    #[test]
     fn opening_messages_count_matches() {
         let text = "# Name
 A
@@ -850,8 +1001,9 @@ Three.";
     #[test]
     fn description_excluded_from_permanent_budget() {
         let desc = "word ".repeat(2000); // ~2000 chars, ~500 tokens
-        // Personality needs to be >1000 tokens to avoid low-quality flag
-        let med = "X is a friendly character with a warm personality and a great sense of humor. ".repeat(60);
+                                         // Personality needs to be >1000 tokens to avoid low-quality flag
+        let med = "X is a friendly character with a warm personality and a great sense of humor. "
+            .repeat(60);
         let text = format!(
             "# Name
 X
@@ -876,9 +1028,7 @@ Hello."
         // Permanent should still pass since description isn't counted
         assert_eq!(v["within_budget"], json!(true));
         // But description tokens should be reported
-        let desc_tokens = v["per_section_tokens"]["description"]
-            .as_u64()
-            .unwrap_or(0);
+        let desc_tokens = v["per_section_tokens"]["description"].as_u64().unwrap_or(0);
         assert!(desc_tokens > 0, "description should have token count");
     }
 
