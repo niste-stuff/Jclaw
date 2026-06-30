@@ -20567,11 +20567,9 @@ mod alias_resolution_tests {
     fn test_ollama_host_bypasses_model_validation() {
         let _guard = ollama_env_lock();
         let _env = EnvVarGuard::set("OLLAMA_HOST", "http://127.0.0.1:11434");
-        // Ollama model names with colons pass
         assert!(validate_model_syntax("qwen3:8b").is_ok());
         assert!(validate_model_syntax("gemma4:e2b").is_ok());
         assert!(validate_model_syntax("qwen3.6:27b-nvfp4").is_ok());
-        // Empty model still rejected
         assert!(validate_model_syntax("").is_err());
     }
 }
