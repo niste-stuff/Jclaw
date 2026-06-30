@@ -281,20 +281,15 @@ pub fn edit_file(
              change the file, set new_string to the new text you want in place of old_string.",
         ));
     }
-    if !original_file.contains(old_string) {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "old_string not found in file, so nothing was changed. The file was NOT modified. \
-             Re-read the file and copy the exact current text (including whitespace and \
-             punctuation) into old_string before editing.",
-        ));
-    }
 
-    let updated = if replace_all {
-        original_file.replace(old_string, new_string)
-    } else {
-        original_file.replacen(old_string, new_string, 1)
-    };
+    // Match using the file's own line endings: convert the model-supplied
+    // strings (which may use either ending) to the file's, so a CRLF file still
+    // matches an LF old_string and stays CRLF after the edit.
+    let ending = detect_line_ending(&original_file);
+    let old = convert_to_line_ending(&normalize_line_endings(old_string), ending);
+    let new = convert_to_line_ending(&normalize_line_endings(new_string), ending);
+
+    let updated = replace(&original_file, &old, &new, replace_all)?;
     fs::write(&absolute_path, &updated)?;
 
     Ok(EditFileOutput {
@@ -307,6 +302,447 @@ pub fn edit_file(
         replace_all,
         git_diff: None,
     })
+}
+
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+fn detect_line_ending(text: &str) -> &'static str {
+    if text.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+fn convert_to_line_ending(text: &str, ending: &str) -> String {
+    if ending == "\n" {
+        text.to_string()
+    } else {
+        text.replace('\n', "\r\n")
+    }
+}
+
+/// Levenshtein edit distance, used by the block-anchor fallback to score how
+/// similar a candidate block's middle lines are to the requested edit.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.is_empty() || b.is_empty() {
+        return a.len().max(b.len());
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0usize; b.len() + 1];
+    for i in 1..=a.len() {
+        curr[0] = i;
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b.len()]
+}
+
+// Block-anchor similarity threshold (fraction of middle-line similarity).
+const BLOCK_ANCHOR_SIMILARITY_THRESHOLD: f64 = 0.65;
+
+/// The edit replacers, ported from opencode's `edit.ts`. Each yields candidate
+/// substrings of `content` that could be the intended match for `find`, from
+/// strictest (exact) to most forgiving (anchor/context based). [`replace`] then
+/// applies the first candidate that exists and is unambiguous.
+type Replacer = fn(&str, &str) -> Vec<String>;
+
+/// Exact match.
+fn simple_replacer(_content: &str, find: &str) -> Vec<String> {
+    vec![find.to_string()]
+}
+
+/// Drop a single trailing empty line left by a `find` that ended in `\n`.
+fn trim_trailing_empty(lines: &mut Vec<&str>) {
+    if lines.len() > 1 && lines.last() == Some(&"") {
+        lines.pop();
+    }
+}
+
+/// Match line-by-line ignoring each line's leading/trailing whitespace.
+fn line_trimmed_replacer(content: &str, find: &str) -> Vec<String> {
+    let original: Vec<&str> = content.split('\n').collect();
+    let mut search: Vec<&str> = find.split('\n').collect();
+    trim_trailing_empty(&mut search);
+    if search.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if original.len() < search.len() {
+        return out;
+    }
+    for i in 0..=(original.len() - search.len()) {
+        let matches = (0..search.len()).all(|j| original[i + j].trim() == search[j].trim());
+        if matches {
+            out.push(original[i..i + search.len()].join("\n"));
+        }
+    }
+    out
+}
+
+/// Match a ≥3-line block by its first and last lines (the "anchors"), accepting
+/// the candidate only when the middle lines are similar enough.
+fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
+    let original: Vec<&str> = content.split('\n').collect();
+    let mut search: Vec<&str> = find.split('\n').collect();
+    if search.len() < 3 {
+        return Vec::new();
+    }
+    trim_trailing_empty(&mut search);
+    let first = search[0].trim();
+    let last = search[search.len() - 1].trim();
+    let block_size = search.len();
+    let max_delta = 1.max(block_size / 4);
+
+    let mut candidates: Vec<(usize, usize)> = Vec::new();
+    for (i, first_line) in original.iter().enumerate() {
+        if first_line.trim() != first {
+            continue;
+        }
+        for (j, last_line) in original.iter().enumerate().skip(i + 2) {
+            if last_line.trim() == last {
+                let actual = j - i + 1;
+                if actual.abs_diff(block_size) <= max_delta {
+                    candidates.push((i, j));
+                }
+                break;
+            }
+        }
+    }
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let middle_similarity = |start: usize, end: usize| -> f64 {
+        let actual = end - start + 1;
+        let to_check = (block_size.saturating_sub(2)).min(actual.saturating_sub(2));
+        if to_check == 0 {
+            return 1.0;
+        }
+        let mut similarity = 0.0;
+        let mut j = 1;
+        while j < block_size - 1 && j < actual - 1 {
+            let original_line = original[start + j].trim();
+            let search_line = search[j].trim();
+            let max_len = original_line
+                .chars()
+                .count()
+                .max(search_line.chars().count());
+            if max_len != 0 {
+                let distance = levenshtein(original_line, search_line);
+                similarity += (1.0 - distance as f64 / max_len as f64) / to_check as f64;
+            }
+            j += 1;
+        }
+        similarity
+    };
+
+    let best = if candidates.len() == 1 {
+        candidates[0]
+    } else {
+        let mut best = candidates[0];
+        let mut best_sim = -1.0;
+        for &(start, end) in &candidates {
+            // Average (not threshold-accumulated) similarity for ranking.
+            let actual = end - start + 1;
+            let to_check = (block_size.saturating_sub(2)).min(actual.saturating_sub(2));
+            let sim = if to_check == 0 {
+                1.0
+            } else {
+                let mut total = 0.0;
+                let mut j = 1;
+                while j < block_size - 1 && j < actual - 1 {
+                    let o = original[start + j].trim();
+                    let s = search[j].trim();
+                    let max_len = o.chars().count().max(s.chars().count());
+                    if max_len != 0 {
+                        total += 1.0 - levenshtein(o, s) as f64 / max_len as f64;
+                    }
+                    j += 1;
+                }
+                total / to_check as f64
+            };
+            if sim > best_sim {
+                best_sim = sim;
+                best = (start, end);
+            }
+        }
+        if best_sim < BLOCK_ANCHOR_SIMILARITY_THRESHOLD {
+            return Vec::new();
+        }
+        best
+    };
+
+    if candidates.len() == 1
+        && middle_similarity(best.0, best.1) < BLOCK_ANCHOR_SIMILARITY_THRESHOLD
+    {
+        return Vec::new();
+    }
+    vec![original[best.0..=best.1].join("\n")]
+}
+
+/// Collapse all runs of whitespace to a single space for comparison.
+fn whitespace_normalized_replacer(content: &str, find: &str) -> Vec<String> {
+    let normalize = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized_find = normalize(find);
+    if normalized_find.is_empty() {
+        return Vec::new();
+    }
+    let lines: Vec<&str> = content.split('\n').collect();
+    let mut out = Vec::new();
+    for &line in &lines {
+        if normalize(line) == normalized_find {
+            out.push(line.to_string());
+        }
+    }
+    let find_lines: Vec<&str> = find.split('\n').collect();
+    if find_lines.len() > 1 && lines.len() >= find_lines.len() {
+        for i in 0..=(lines.len() - find_lines.len()) {
+            let block = lines[i..i + find_lines.len()].join("\n");
+            if normalize(&block) == normalized_find {
+                out.push(block);
+            }
+        }
+    }
+    out
+}
+
+/// Match after stripping the common leading indentation from both sides.
+fn indentation_flexible_replacer(content: &str, find: &str) -> Vec<String> {
+    let remove_indentation = |text: &str| -> String {
+        let lines: Vec<&str> = text.split('\n').collect();
+        let min_indent = lines
+            .iter()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| l.len() - l.trim_start().len())
+            .min();
+        match min_indent {
+            None => text.to_string(),
+            Some(min) => lines
+                .iter()
+                .map(|l| {
+                    if l.trim().is_empty() {
+                        (*l).to_string()
+                    } else {
+                        l[min..].to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    };
+    let normalized_find = remove_indentation(find);
+    let content_lines: Vec<&str> = content.split('\n').collect();
+    let find_lines: Vec<&str> = find.split('\n').collect();
+    let mut out = Vec::new();
+    if content_lines.len() < find_lines.len() {
+        return out;
+    }
+    for i in 0..=(content_lines.len() - find_lines.len()) {
+        let block = content_lines[i..i + find_lines.len()].join("\n");
+        if remove_indentation(&block) == normalized_find {
+            out.push(block);
+        }
+    }
+    out
+}
+
+/// Resolve common backslash escapes, so a `find` the model wrote with literal
+/// `\n`/`\t` still matches real newlines/tabs in the file.
+fn unescape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('\'') => out.push('\''),
+            Some('"') => out.push('"'),
+            Some('`') => out.push('`'),
+            Some('\\') => out.push('\\'),
+            Some('\n') => out.push('\n'),
+            Some('$') => out.push('$'),
+            _ => {
+                out.push('\\');
+                continue;
+            }
+        }
+        chars.next();
+    }
+    out
+}
+
+/// Match when the model escaped characters (`\n`, `\t`, ...) that are literal in
+/// the file.
+fn escape_normalized_replacer(content: &str, find: &str) -> Vec<String> {
+    let unescaped = unescape(find);
+    let mut out = Vec::new();
+    if unescaped != find && content.contains(&unescaped) {
+        out.push(unescaped.clone());
+    }
+    let lines: Vec<&str> = content.split('\n').collect();
+    let find_lines: Vec<&str> = unescaped.split('\n').collect();
+    if lines.len() >= find_lines.len() {
+        for i in 0..=(lines.len() - find_lines.len()) {
+            let block = lines[i..i + find_lines.len()].join("\n");
+            if unescape(&block) == unescaped {
+                out.push(block);
+            }
+        }
+    }
+    out
+}
+
+/// Match after trimming whitespace from the whole `find` (handles a stray
+/// leading/trailing blank line).
+fn trimmed_boundary_replacer(content: &str, find: &str) -> Vec<String> {
+    let trimmed = find.trim();
+    if trimmed == find {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if !trimmed.is_empty() && content.contains(trimmed) {
+        out.push(trimmed.to_string());
+    }
+    let lines: Vec<&str> = content.split('\n').collect();
+    let find_lines: Vec<&str> = find.split('\n').collect();
+    if lines.len() >= find_lines.len() {
+        for i in 0..=(lines.len() - find_lines.len()) {
+            let block = lines[i..i + find_lines.len()].join("\n");
+            if block.trim() == trimmed {
+                out.push(block);
+            }
+        }
+    }
+    out
+}
+
+/// Yield every exact occurrence (drives `replace_all`).
+fn multi_occurrence_replacer(content: &str, find: &str) -> Vec<String> {
+    if find.is_empty() || !content.contains(find) {
+        return Vec::new();
+    }
+    vec![find.to_string()]
+}
+
+/// `true` when a fuzzy match ballooned far beyond `old`, so applying it would
+/// likely clobber unintended content. Ported from opencode's
+/// `isDisproportionateMatch`.
+fn is_disproportionate_match(search: &str, old: &str) -> bool {
+    let old_lines = old.split('\n').count();
+    let search_lines = search.split('\n').count();
+    if search_lines >= (old_lines + 3).max(old_lines * 2) {
+        return true;
+    }
+    if old_lines == 1 {
+        return false;
+    }
+    search.trim().len() > (old.trim().len() + 500).max(old.trim().len() * 4)
+}
+
+/// Apply a string replacement using opencode's multi-strategy replacer chain.
+///
+/// Strategies run from strict (exact) to forgiving (line-trimmed, block-anchor,
+/// whitespace-normalized, indentation-flexible). The first candidate that
+/// exists in `content` is used — but only if it is unique (or `replace_all` is
+/// set), so an ambiguous edit is rejected rather than silently applied to the
+/// first occurrence. A candidate that is wildly larger than `old_string` is
+/// refused outright.
+fn replace(
+    content: &str,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+) -> io::Result<String> {
+    if old_string == new_string {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "old_string and new_string are identical, so this edit would change nothing. \
+             The file was NOT modified. A no-op edit does not commit any change — to actually \
+             change the file, set new_string to the new text you want in place of old_string.",
+        ));
+    }
+    if old_string.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "old_string cannot be empty when editing an existing file. Provide the exact text to \
+             replace, or use write_file for an intentional full-file replacement.",
+        ));
+    }
+
+    let replacers: [Replacer; 8] = [
+        simple_replacer,
+        line_trimmed_replacer,
+        block_anchor_replacer,
+        whitespace_normalized_replacer,
+        indentation_flexible_replacer,
+        escape_normalized_replacer,
+        trimmed_boundary_replacer,
+        multi_occurrence_replacer,
+    ];
+
+    let mut found = false;
+    for replacer in replacers {
+        for search in replacer(content, old_string) {
+            if search.is_empty() {
+                continue;
+            }
+            let Some(index) = content.find(&search) else {
+                continue;
+            };
+            found = true;
+            if is_disproportionate_match(&search, old_string) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "refusing replacement because the matched span is much larger than \
+                     old_string. Re-read the file and provide the full exact old_string for the \
+                     intended replacement.",
+                ));
+            }
+            if replace_all {
+                return Ok(content.replace(&search, new_string));
+            }
+            let last = content.rfind(&search).unwrap_or(index);
+            if index != last {
+                // The candidate itself occurs more than once — keep looking for
+                // a uniquely-locatable candidate before giving up.
+                continue;
+            }
+            return Ok(format!(
+                "{}{}{}",
+                &content[..index],
+                new_string,
+                &content[index + search.len()..]
+            ));
+        }
+    }
+
+    if found {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Found multiple matches for old_string. Provide more surrounding context to make the \
+             match unique, or set replace_all to true to change every occurrence.",
+        ))
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Could not find old_string in the file. It must match exactly, including whitespace, \
+             indentation, and line endings. Re-read the file and copy the current text into \
+             old_string.",
+        ))
+    }
 }
 
 /// Expands a glob pattern and returns matching filenames.
@@ -990,6 +1426,149 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&workspace);
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn edit_rejects_ambiguous_exact_match() {
+        let path = temp_path("edit-ambiguous.txt");
+        write_file(path.to_string_lossy().as_ref(), "x\nx\n").expect("seed");
+        // "x" occurs twice; without replace_all the edit must be refused, not
+        // silently applied to the first occurrence.
+        let result = edit_file(path.to_string_lossy().as_ref(), "x", "y", false);
+        assert!(result.is_err(), "ambiguous edit must be rejected");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("multiple matches"), "{error}");
+        // File must be untouched.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "x\nx\n");
+
+        // replace_all changes every occurrence.
+        edit_file(path.to_string_lossy().as_ref(), "x", "y", true).expect("replace_all");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "y\ny\n");
+    }
+
+    #[test]
+    fn edit_forgives_indentation_when_unique() {
+        let path = temp_path("edit-fuzzy.txt");
+        // File is indented; old_string is supplied without the indentation.
+        write_file(path.to_string_lossy().as_ref(), "    foo\n    bar\n").expect("seed");
+        edit_file(path.to_string_lossy().as_ref(), "foo\nbar", "baz", false)
+            .expect("line-trimmed fallback should locate the block");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "baz\n");
+    }
+
+    #[test]
+    fn edit_fuzzy_replaces_first_unique_block() {
+        // Two indentation-differing copies; the un-indented old_string fuzzily
+        // matches each, but the first candidate is itself a unique substring, so
+        // opencode's chain applies it rather than erroring.
+        let path = temp_path("edit-fuzzy-first.txt");
+        write_file(path.to_string_lossy().as_ref(), "  a\n  b\n\n   a\n   b\n").expect("seed");
+        edit_file(path.to_string_lossy().as_ref(), "a\nb", "z", false).expect("first block edits");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "z\n\n   a\n   b\n");
+    }
+
+    #[test]
+    fn edit_rejects_empty_old_string() {
+        let path = temp_path("edit-empty-old.txt");
+        write_file(path.to_string_lossy().as_ref(), "content").expect("seed");
+        let error = edit_file(path.to_string_lossy().as_ref(), "", "x", false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("cannot be empty") && error.contains("write_file"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn edit_handles_multiline_replacement() {
+        let path = temp_path("edit-multiline.txt");
+        write_file(path.to_string_lossy().as_ref(), "line1\nline2\nline3").expect("seed");
+        edit_file(
+            path.to_string_lossy().as_ref(),
+            "line2",
+            "new line 2\nextra line",
+            false,
+        )
+        .expect("multiline edit");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "line1\nnew line 2\nextra line\nline3"
+        );
+    }
+
+    #[test]
+    fn edit_preserves_crlf_line_endings() {
+        let path = temp_path("edit-crlf.txt");
+        write_file(path.to_string_lossy().as_ref(), "line1\r\nold\r\nline3").expect("seed");
+        // old_string supplied with LF still matches the CRLF file, which stays CRLF.
+        edit_file(path.to_string_lossy().as_ref(), "old", "new", false).expect("crlf edit");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "line1\r\nnew\r\nline3"
+        );
+    }
+
+    #[test]
+    fn edit_whitespace_normalized_match() {
+        let path = temp_path("edit-ws.txt");
+        write_file(path.to_string_lossy().as_ref(), "const   x = 1").expect("seed");
+        // Internal spacing differs from the file; the whitespace-normalized
+        // replacer still locates it.
+        edit_file(
+            path.to_string_lossy().as_ref(),
+            "const x = 1",
+            "const y = 2",
+            false,
+        )
+        .expect("whitespace-normalized edit");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "const y = 2");
+    }
+
+    #[test]
+    fn edit_block_anchor_tolerates_middle_drift() {
+        let path = temp_path("edit-anchor.txt");
+        write_file(
+            path.to_string_lossy().as_ref(),
+            "function f() {\n  doThing()\n}\n",
+        )
+        .expect("seed");
+        // Middle line has a typo; the first/last anchors match and the middle is
+        // similar enough for the block-anchor replacer to locate the block.
+        edit_file(
+            path.to_string_lossy().as_ref(),
+            "function f() {\n  doThng()\n}",
+            "function f() {\n  doThing2()\n}",
+            false,
+        )
+        .expect("block-anchor edit");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "function f() {\n  doThing2()\n}\n"
+        );
+    }
+
+    #[test]
+    fn edit_escape_normalized_match() {
+        let path = temp_path("edit-escape.txt");
+        write_file(path.to_string_lossy().as_ref(), "a\nb").expect("seed");
+        // old_string uses a literal backslash-n that should match the real newline.
+        edit_file(path.to_string_lossy().as_ref(), "a\\nb", "c", false)
+            .expect("escape-normalized edit");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "c");
+    }
+
+    #[test]
+    fn disproportionate_match_guard_flags_ballooned_spans() {
+        // A single-line old loosely "matching" a many-line span is refused.
+        assert!(super::is_disproportionate_match("a\nb\nc\nd\ne", "a"));
+        assert!(!super::is_disproportionate_match("alpha", "alpha"));
+        // Multi-line old: a span far longer than the trimmed old is refused.
+        let big = "x".repeat(600);
+        assert!(super::is_disproportionate_match(
+            &format!("a\n{big}"),
+            "a\nb"
+        ));
     }
 
     #[test]

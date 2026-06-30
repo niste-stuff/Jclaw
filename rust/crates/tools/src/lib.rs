@@ -548,7 +548,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "write_file",
-            description: "Write a text file in the workspace. Overwrites the whole file with `content`. Writes that would shrink a substantial existing file by more than half are rejected as likely truncated; set `allow_shrink` to true only when the shrink is intentional.",
+            description: "Write a text file in the workspace, overwriting any existing file at `path` with the full `content`. Prefer `edit_file` for targeted changes to a file that already exists; use `write_file` for new files or a complete rewrite, and always write the ENTIRE file in one call — never a truncated or partial version. A write that would shrink a substantial existing file by more than half is rejected as a likely truncation; set `allow_shrink` to true only when the shrink is intentional.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -563,7 +563,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "edit_file",
-            description: "Replace text in a workspace file.",
+            description: "Replace an exact substring in a workspace file. `old_string` must match the current file contents exactly (including whitespace and indentation) and must be UNIQUE: if it appears more than once the edit is rejected as ambiguous — add surrounding context to make it match exactly once, or set `replace_all` to true to change every occurrence. An edit whose `old_string` equals `new_string` changes nothing and is rejected. Prefer a small, targeted edit over rewriting the whole file with `write_file`. Do not include any read_file line-number prefixes in `old_string`/`new_string`.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -9996,7 +9996,7 @@ mod tests {
             &json!({ "path": "nested/demo.txt", "old_string": "missing", "new_string": "omega" }),
         )
         .expect_err("missing substring should fail");
-        assert!(edit_missing.contains("old_string not found"));
+        assert!(edit_missing.contains("Could not find old_string"));
 
         std::env::set_current_dir(&original_dir).expect("restore cwd");
         let _ = fs::remove_dir_all(root);
