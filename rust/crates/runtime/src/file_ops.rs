@@ -276,13 +276,17 @@ pub fn edit_file(
     if old_string == new_string {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "old_string and new_string must differ",
+            "old_string and new_string are identical, so this edit would change nothing. \
+             The file was NOT modified. A no-op edit does not commit any change — to actually \
+             change the file, set new_string to the new text you want in place of old_string.",
         ));
     }
     if !original_file.contains(old_string) {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "old_string not found in file",
+            "old_string not found in file, so nothing was changed. The file was NOT modified. \
+             Re-read the file and copy the exact current text (including whitespace and \
+             punctuation) into old_string before editing.",
         ));
     }
 
@@ -687,16 +691,62 @@ pub fn read_file_in_workspace(
     read_file(path, offset, limit)
 }
 
+/// An existing file at least this large (bytes) is "substantial": shrinking it
+/// to less than half its size is treated as a likely-truncated write.
+const TRUNCATION_GUARD_MIN_BYTES: u64 = 800;
+
+/// Guard against silent data loss from a truncated/incomplete write that would
+/// overwrite a substantial existing file with a much smaller payload (e.g. a
+/// recovery fallback that only kept the first few lines). Returns `Err` when the
+/// shrink looks accidental and `allow_shrink` was not set.
+fn check_truncation_guard(
+    absolute_path: &Path,
+    new_len: usize,
+    allow_shrink: bool,
+) -> io::Result<()> {
+    if allow_shrink {
+        return Ok(());
+    }
+    // New or unreadable target: nothing to lose, let the write proceed.
+    let Ok(metadata) = fs::metadata(absolute_path) else {
+        return Ok(());
+    };
+    let old_len = metadata.len();
+    let new_len = new_len as u64;
+    if old_len >= TRUNCATION_GUARD_MIN_BYTES && new_len < old_len / 2 {
+        let reduction_pct = 100u64.saturating_sub(new_len.saturating_mul(100) / old_len.max(1));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "refusing to overwrite {} : new content is {new_len} bytes vs the existing \
+                 {old_len} bytes (a {reduction_pct}% reduction). A drop this large usually \
+                 means the write was truncated or incomplete and would silently destroy \
+                 existing content. If the file genuinely should shrink, repeat the write with \
+                 \"allow_shrink\": true. Otherwise re-generate the FULL file, or use edit_file \
+                 for targeted changes.",
+                absolute_path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Write a file with workspace boundary enforcement.
+///
+/// `allow_shrink` opts out of the truncation guard that rejects writes which
+/// would shrink a substantial existing file by more than half (see
+/// [`check_truncation_guard`]).
 #[allow(dead_code)]
 pub fn write_file_in_workspace(
     path: &str,
     content: &str,
+    allow_shrink: bool,
     workspace_root: &Path,
 ) -> io::Result<WriteFileOutput> {
     let absolute_path = normalize_path_allow_missing(path)?;
     let canonical_root = canonicalize_workspace_root(workspace_root);
     validate_workspace_boundary(&absolute_path, &canonical_root)?;
+    check_truncation_guard(&absolute_path, content.len(), allow_shrink)?;
     write_file(path, content)
 }
 
@@ -943,6 +993,75 @@ mod tests {
     }
 
     #[test]
+    fn truncation_guard_rejects_large_shrink_without_allow_shrink() {
+        let workspace = temp_path("truncation-guard");
+        std::fs::create_dir_all(&workspace).expect("workspace dir should be created");
+        let card = workspace.join("card.md");
+        // A substantial existing card (well over the 800-byte guard threshold).
+        let original = "x".repeat(4000);
+        write_file(card.to_string_lossy().as_ref(), &original).expect("seed write should succeed");
+
+        // A truncated recovery payload that drops most of the content.
+        let truncated = "only a few lines survived\n".repeat(3);
+        let result = write_file_in_workspace(
+            card.to_string_lossy().as_ref(),
+            &truncated,
+            false,
+            &workspace,
+        );
+        assert!(result.is_err(), "large shrink must be rejected by default");
+        let error = result.unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            error.to_string().contains("allow_shrink"),
+            "error should point at the allow_shrink escape hatch: {error}"
+        );
+        // The original content must be untouched.
+        assert_eq!(
+            std::fs::read_to_string(&card).unwrap(),
+            original,
+            "a rejected truncated write must not modify the file"
+        );
+
+        // The same write succeeds when the shrink is explicitly allowed.
+        write_file_in_workspace(
+            card.to_string_lossy().as_ref(),
+            &truncated,
+            true,
+            &workspace,
+        )
+        .expect("allow_shrink should permit the shrink");
+        assert_eq!(std::fs::read_to_string(&card).unwrap(), truncated);
+
+        let _ = std::fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn truncation_guard_allows_growth_and_small_files() {
+        let workspace = temp_path("truncation-guard-ok");
+        std::fs::create_dir_all(&workspace).expect("workspace dir should be created");
+        let card = workspace.join("card.md");
+
+        // Brand-new file: no existing content to lose.
+        write_file_in_workspace(card.to_string_lossy().as_ref(), "tiny", false, &workspace)
+            .expect("creating a new file should succeed");
+
+        // Growing a file is always fine.
+        let big = "y".repeat(5000);
+        write_file_in_workspace(card.to_string_lossy().as_ref(), &big, false, &workspace)
+            .expect("growth should succeed");
+
+        // Shrinking a tiny (sub-threshold) file is fine even without allow_shrink:
+        // seed a small file, then halve it.
+        let small = workspace.join("small.md");
+        write_file(small.to_string_lossy().as_ref(), "abcdefghij").expect("seed small");
+        write_file_in_workspace(small.to_string_lossy().as_ref(), "ab", false, &workspace)
+            .expect("shrinking a sub-threshold file should be allowed");
+
+        let _ = std::fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
     #[cfg(unix)]
     fn workspace_write_rejects_parent_symlink_escape_regression_3007_class() {
         let workspace = temp_path("workspace-write-symlink-escape");
@@ -957,6 +1076,7 @@ mod tests {
         let result = write_file_in_workspace(
             escaped_child.to_string_lossy().as_ref(),
             "must not escape",
+            false,
             &workspace,
         );
 

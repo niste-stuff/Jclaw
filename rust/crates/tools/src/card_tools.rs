@@ -105,6 +105,94 @@ fn known_sections() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
+/// A header line matched by the (forgiving) section parser.
+struct HeaderMatch {
+    /// The header label text (e.g. "Opening Messages").
+    header: String,
+    /// Content that appeared after the header on the same line (the `Label: x`
+    /// form), to be treated as the section's first body line.
+    inline_body: Option<String>,
+}
+
+/// Map a label to its canonical section header, accepting the canonical names
+/// and the SillyTavern/Janitor field synonyms (`first_mes`, `mes_example`, ...).
+fn canonical_label(label: &str) -> Option<&'static str> {
+    object_key_to_header(&normalise_header(label))
+}
+
+/// Strip a fully emphasis-wrapped line (`**x**`, `__x__`, `*x*`, `_x_`),
+/// returning the inner text when the whole line is wrapped.
+fn strip_emphasis(line: &str) -> Option<&str> {
+    for marker in ["**", "__", "*", "_"] {
+        if let Some(inner) = line
+            .strip_prefix(marker)
+            .and_then(|rest| rest.strip_suffix(marker))
+        {
+            let inner = inner.trim();
+            if !inner.is_empty() {
+                return Some(inner);
+            }
+        }
+    }
+    None
+}
+
+/// Recognise a section header line.
+///
+/// The canonical form is an ATX header (`# Name`). To stop the model from
+/// looping on layout when it reaches for a different style, the parser also
+/// recovers two common variants for *known* section labels: an emphasis-wrapped
+/// label (`**Name**`) and a `Label:` line (`Name: Aria`). Recovery is limited to
+/// known labels so ordinary prose (e.g. `{{char}}: hi`) is not mistaken for a
+/// header.
+fn match_header(line: &str) -> Option<HeaderMatch> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // ATX headers: any run of leading '#'. Unrestricted — unknown `# Foo`
+    // headers are still parsed and reported as warnings downstream.
+    if trimmed.starts_with('#') {
+        let header = trimmed.trim_start_matches('#').trim().to_string();
+        if header.is_empty() {
+            return None;
+        }
+        return Some(HeaderMatch {
+            header,
+            inline_body: None,
+        });
+    }
+
+    // Emphasis-wrapped known label on its own line: **Name**, __Personality__.
+    if let Some(inner) = strip_emphasis(trimmed) {
+        let label = inner.trim_end_matches(':').trim();
+        if let Some(canonical) = canonical_label(label) {
+            return Some(HeaderMatch {
+                header: canonical.to_string(),
+                inline_body: None,
+            });
+        }
+    }
+
+    // `Label:` form, where the text before the first colon is exactly a known
+    // section label. Content after the colon becomes the section's first body
+    // line.
+    if let Some((label, rest)) = trimmed.split_once(':') {
+        let label = strip_emphasis(label.trim()).unwrap_or(label).trim();
+        if let Some(canonical) = canonical_label(label) {
+            let inline = rest.trim();
+            let inline_body = (!inline.is_empty()).then(|| inline.to_string());
+            return Some(HeaderMatch {
+                header: canonical.to_string(),
+                inline_body,
+            });
+        }
+    }
+
+    None
+}
+
 /// Parse a Markdown card text into a list of sections.
 fn parse_sections(text: &str) -> Vec<CardSection> {
     let known: Vec<(String, &str)> = known_sections()
@@ -117,7 +205,7 @@ fn parse_sections(text: &str) -> Vec<CardSection> {
     let mut current_lines: Vec<String> = Vec::new();
 
     for line in text.lines() {
-        if line.starts_with('#') {
+        if let Some(matched) = match_header(line) {
             // Flush previous section
             if let Some(header) = current_header.take() {
                 let raw_body = current_lines.join("\n");
@@ -127,7 +215,10 @@ fn parse_sections(text: &str) -> Vec<CardSection> {
                 current_lines.clear();
             }
             // Start new section
-            current_header = Some(line.trim_start_matches('#').trim().to_string());
+            current_header = Some(matched.header);
+            if let Some(inline) = matched.inline_body {
+                current_lines.push(inline);
+            }
         } else if current_header.is_some() {
             current_lines.push(line.to_string());
         }
@@ -322,6 +413,24 @@ pub fn validate_card(input: &Value) -> Result<String, String> {
     Ok(report.to_string())
 }
 
+/// Strict wrapper around [`validate_card`]: returns `Err` when the card is
+/// structurally invalid, so the agent loop surfaces the result as a tool error
+/// (`is_error = true`) instead of an easily-ignored success payload. This stops
+/// the model from reading past a `valid: false` report and telling the user the
+/// card is finished.
+pub fn validate_card_strict(input: &Value) -> Result<String, String> {
+    let report = validate_card(input)?;
+    let parsed: Value = serde_json::from_str(&report).map_err(|error| error.to_string())?;
+    if parsed.get("valid").and_then(Value::as_bool) != Some(true) {
+        return Err(format!(
+            "card is INVALID — it does not meet the Janitor card schema, so you have NOT \
+             produced a finished card. Do not tell the user the card is done. Fix every error \
+             listed below and re-run validate_card until `valid` is true.\n{report}"
+        ));
+    }
+    Ok(report)
+}
+
 /// Extract the card's Markdown text from a tool input.
 ///
 /// Accepts every shape the tool schema advertises:
@@ -492,7 +601,17 @@ pub fn token_budget_check(input: &Value) -> Result<String, String> {
 
     let mut flags: Vec<String> = Vec::new();
     // Quality bands: 0-1k low, 1k-4k sweet spot, 4k-5k above ideal, >5k too much
-    if personality_tokens < PERSONALITY_LOW_QUALITY {
+    if personality_tokens == 0 {
+        // 0 tokens almost always means the parser found no `# Personality`
+        // section, not that the content is short. Say so explicitly so the
+        // result is not misread as a token count for present-but-tiny content.
+        flags.push(
+            "personality section is empty or was not found (0 tokens). The parser saw no \
+             content under a `# Personality` header — confirm the header exists and is spelled \
+             correctly before judging the size."
+                .to_string(),
+        );
+    } else if personality_tokens < PERSONALITY_LOW_QUALITY {
         flags.push(format!(
             "personality ~{personality_tokens} tokens is low quality; avoid unless the user explicitly wants a short card"
         ));
@@ -954,6 +1073,126 @@ hi";
     fn empty_object_card_errors_helpfully() {
         let err = validate_card(&json!({ "card": {} })).unwrap_err();
         assert!(err.contains("recognised fields"), "got: {err}");
+    }
+
+    #[test]
+    fn colon_style_headers_parse_and_validate() {
+        // The model sometimes reaches for `Label:` instead of `# Label`.
+        let text = "Name: Aria
+
+Personality:
+{{char}} is warm and witty and speaks with a gentle cadence.
+
+Opening Messages:
+Hi {{user}}, fancy seeing you here!";
+        let out = validate_card(&json!({ "card": text })).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true), "report: {out}");
+        assert_eq!(v["opening_message_count"], json!(1));
+    }
+
+    #[test]
+    fn bold_headers_parse_and_validate() {
+        let text = "**Name**
+Kai
+
+**Personality**
+{{char}} is a quiet observer who speaks in short sentences.
+
+**Opening Messages**
+The stars are out tonight.";
+        let out = validate_card(&json!({ "card": text })).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true), "report: {out}");
+    }
+
+    #[test]
+    fn synonym_colon_header_maps_to_canonical_section() {
+        // `first_mes:` must be recognised as the Opening Messages section, not
+        // an unrecognised section.
+        let text = "# Name
+Akira
+
+# Personality
+{{char}} keeps everyone at arm's length.
+
+first_mes:
+{{char}} glances up, expression unreadable.";
+        let out = validate_card(&json!({ "card": text })).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true), "report: {out}");
+        assert_eq!(v["opening_message_count"], json!(1));
+        assert!(v["sections_present"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s == "opening_messages"));
+    }
+
+    #[test]
+    fn prose_colon_lines_are_not_headers() {
+        // Lines like `{{char}}: ...` use unknown labels and must stay body text,
+        // not split the section.
+        let text = "# Name
+Aria
+
+# Personality
+{{char}} is warm.
+
+# Opening Messages
+{{char}}: Hello there, {{user}}.
+{{user}}: Hi!
+{{char}}: How are you today?";
+        let out = validate_card(&json!({ "card": text })).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true), "report: {out}");
+        // All three colon lines are one opening message (no `---` separators).
+        assert_eq!(v["opening_message_count"], json!(1));
+    }
+
+    #[test]
+    fn validate_card_strict_errors_on_invalid() {
+        // Missing required Name section.
+        let text = "# Personality
+p
+
+---
+
+# Opening Messages
+hi";
+        let err = validate_card_strict(&json!({ "card": text })).unwrap_err();
+        assert!(err.contains("INVALID"), "got: {err}");
+        // The full report is still attached for the model to act on.
+        assert!(err.contains("\"valid\":false"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_card_strict_ok_on_valid() {
+        let out = validate_card_strict(&json!({ "card": minimal_good_card() })).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true));
+    }
+
+    #[test]
+    fn token_budget_zero_personality_explains_not_found() {
+        // Misspelled header → personality parsed as 0 tokens. The flag should
+        // explain "not found", not just call it low quality.
+        let text = "# Name
+X
+
+# Persanality
+{{char}} is warm.
+
+# Opening Messages
+hi";
+        let out = token_budget_check(&json!({ "card": text })).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["per_section_tokens"]["personality"], json!(0));
+        assert!(v["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f.as_str().unwrap().contains("not found")));
     }
 
     #[test]

@@ -548,12 +548,13 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "write_file",
-            description: "Write a text file in the workspace.",
+            description: "Write a text file in the workspace. Overwrites the whole file with `content`. Writes that would shrink a substantial existing file by more than half are rejected as likely truncated; set `allow_shrink` to true only when the shrink is intentional.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "path": { "type": "string" },
-                    "content": { "type": "string" }
+                    "content": { "type": "string" },
+                    "allow_shrink": { "type": "boolean" }
                 },
                 "required": ["path", "content"],
                 "additionalProperties": false
@@ -1593,7 +1594,7 @@ fn execute_tool_with_enforcer(
                 input,
                 PermissionMode::ReadOnly,
             )?;
-            card_tools::validate_card(input)
+            card_tools::validate_card_strict(input)
         }
         "token_budget_check" => {
             maybe_enforce_permission_check_with_mode(
@@ -2290,7 +2291,23 @@ fn run_git_blame(input: GitBlameInput) -> Result<String, String> {
 }
 
 fn from_value<T: for<'de> Deserialize<'de>>(input: &Value) -> Result<T, String> {
-    serde_json::from_value(input.clone()).map_err(|error| error.to_string())
+    serde_json::from_value(input.clone()).map_err(|error| {
+        let message = error.to_string();
+        // Turn serde's terse "missing field `path`" into actionable guidance so
+        // the model supplies every required argument in one call instead of
+        // retrying with the field omitted.
+        if let Some(field) = message
+            .strip_prefix("missing field `")
+            .and_then(|rest| rest.split('`').next())
+        {
+            format!(
+                "missing required argument `{field}`. Include every required argument in a \
+                 single tool call — you cannot omit `{field}` now and supply it later."
+            )
+        } else {
+            message
+        }
+    })
 }
 
 /// Classify bash command permission based on command type and path.
@@ -2573,7 +2590,13 @@ fn run_read_file(input: ReadFileInput) -> Result<String, String> {
 fn run_write_file(input: WriteFileInput) -> Result<String, String> {
     let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
     to_pretty_json(
-        write_file_in_workspace(&input.path, &input.content, &workspace).map_err(io_to_string)?,
+        write_file_in_workspace(
+            &input.path,
+            &input.content,
+            input.allow_shrink.unwrap_or(false),
+            &workspace,
+        )
+        .map_err(io_to_string)?,
     )
 }
 
@@ -2894,6 +2917,10 @@ struct ReadFileInput {
 struct WriteFileInput {
     path: String,
     content: String,
+    /// Opt out of the truncation guard that rejects writes shrinking a
+    /// substantial existing file by more than half.
+    #[serde(default)]
+    allow_shrink: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -9959,7 +9986,10 @@ mod tests {
             &json!({ "path": "nested/demo.txt", "old_string": "omega", "new_string": "omega" }),
         )
         .expect_err("identical old/new should fail");
-        assert!(edit_same.contains("must differ"));
+        assert!(
+            edit_same.contains("identical") && edit_same.contains("change nothing"),
+            "no-op edit error should explain nothing changed: {edit_same}"
+        );
 
         let edit_missing = execute_tool(
             "edit_file",
