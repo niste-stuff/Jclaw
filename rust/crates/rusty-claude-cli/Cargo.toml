@@ -16,6 +16,12 @@ path = "src/main.rs"
 name = "claw-janitor"
 path = "src/main.rs"
 
+# Primary jclaw command: the card-author variant under the project's own name.
+# `jclaw tui` launches the vendored full-screen TUI (see src/tui.rs).
+[[bin]]
+name = "jclaw"
+path = "src/main.rs"
+
 [dependencies]
 api = { path = "../api" }
 commands = { path = "../commands" }

@@ -12397,34 +12397,46 @@ fn short_tool_id(id: &str) -> String {
 /// authoring variant). Both binaries share this `main.rs`; the persona and the
 /// default tool surface switch on the executable name.
 fn janitor_mode() -> bool {
-    let from_name = |name: &str| {
-        std::path::Path::new(name)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s == "claw-janitor")
-            .unwrap_or(false)
+    let is_janitor = |name: &str| {
+        matches!(
+            std::path::Path::new(name)
+                .file_stem()
+                .and_then(|s| s.to_str()),
+            Some("claw-janitor" | "jclaw")
+        )
     };
     if let Ok(exe) = env::current_exe() {
         if exe
             .file_stem()
             .and_then(|s| s.to_str())
-            .map(|s| s == "claw-janitor")
-            .unwrap_or(false)
+            .is_some_and(|s| matches!(s, "claw-janitor" | "jclaw"))
         {
             return true;
         }
     }
-    env::args().next().is_some_and(|arg0| from_name(&arg0))
+    env::args().next().is_some_and(|arg0| is_janitor(&arg0))
 }
 
 /// The name this binary was invoked as, for usage hints: `claw-janitor` for the
 /// card-author variant, otherwise `claw`. Both share this binary, so usage
 /// strings should name whichever the user actually ran.
 fn invoked_cli_name() -> &'static str {
-    if janitor_mode() {
-        "claw-janitor"
-    } else {
-        "claw"
+    let stem = env::current_exe()
+        .ok()
+        .and_then(|exe| exe.file_stem().and_then(|s| s.to_str()).map(str::to_string))
+        .or_else(|| {
+            env::args().next().and_then(|arg0| {
+                std::path::Path::new(&arg0)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(str::to_string)
+            })
+        })
+        .unwrap_or_default();
+    match stem.as_str() {
+        "jclaw" => "jclaw",
+        "claw-janitor" => "claw-janitor",
+        _ => "claw",
     }
 }
 
