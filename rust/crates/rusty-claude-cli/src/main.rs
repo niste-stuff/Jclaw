@@ -18,6 +18,7 @@ mod init;
 mod input;
 mod render;
 mod setup_wizard;
+mod tui;
 
 use std::collections::BTreeSet;
 use std::env;
@@ -1014,6 +1015,12 @@ fn plugin_load_failure_json(failure: &plugins::PluginLoadFailure) -> Value {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
+    // `claw tui` hands the terminal off to the vendored full-screen TUI (Bun
+    // sidecar under `tui/`). It bypasses the normal request pipeline entirely,
+    // so intercept it before any arg parsing or cwd handling.
+    if args.first().map(String::as_str) == Some("tui") {
+        return tui::run_tui(&args[1..]);
+    }
     // #824: suppress config deprecation prose warnings to stderr when JSON
     // output mode is active.  Scan the raw argv before parse_args so the
     // suppression is in place before any settings file is loaded.

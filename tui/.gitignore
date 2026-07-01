@@ -1,0 +1,9 @@
+# Vendored opencode TUI+server stack — dependencies and build artifacts are
+# never committed; run `bun install` here to materialize them.
+node_modules/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+.next/
+*.log
