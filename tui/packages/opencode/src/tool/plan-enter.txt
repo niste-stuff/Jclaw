@@ -1,14 +1,16 @@
-Use this tool to suggest switching to plan agent when the user's request would benefit from planning before implementation.
+Use this tool to suggest switching to the lore planning agent when the user
+wants to brainstorm or develop a character before writing the actual card.
 
-If they explicitly mention wanting to create a plan ALWAYS call this tool first.
+If they explicitly mention wanting to plan lore, personality, appearance, or
+backstory, ALWAYS call this tool first.
 
-This tool will ask the user if they want to switch to plan agent.
+This tool will ask the user if they want to switch to the lore planning agent.
 
 Call this tool when:
-- The user's request is complex and would benefit from planning first
-- You want to research and design before making changes
-- The task involves multiple files or significant architectural decisions
+- The user wants to develop or flesh out a character/persona
+- You want to explore ideas and design a character before writing the card
+- The concept is involved and would benefit from planning first
 
 Do NOT call this tool:
-- For simple, straightforward tasks
-- When the user explicitly wants immediate implementation
+- For simple, straightforward requests
+- When the user explicitly wants to write the card immediately

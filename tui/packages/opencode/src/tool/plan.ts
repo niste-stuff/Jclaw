@@ -31,12 +31,12 @@ export const PlanExitTool = Tool.define(
             sessionID: ctx.sessionID,
             questions: [
               {
-                question: `Plan at ${plan} is complete. Would you like to switch to the build agent and start implementing?`,
+                question: `Character plan at ${plan} is complete. Switch to the build agent to start writing the card?`,
                 header: "Build Agent",
                 custom: false,
                 options: [
-                  { label: "Yes", description: "Switch to build agent and start implementing the plan" },
-                  { label: "No", description: "Stay with plan agent to continue refining the plan" },
+                  { label: "Yes", description: "Switch to build agent and start writing the card" },
+                  { label: "No", description: "Stay in lore planning to keep refining the plan" },
                 ],
               },
             ],
@@ -64,7 +64,7 @@ export const PlanExitTool = Tool.define(
             messageID: msg.id,
             sessionID: ctx.sessionID,
             type: "text",
-            text: `The plan at ${plan} has been approved, you can now edit files. Execute the plan`,
+            text: `The plan at ${plan} has been approved, you can now edit files. Write the card from the plan`,
             synthetic: true,
           } satisfies SessionV1.TextPart)
 

@@ -328,7 +328,7 @@ export function Session() {
       local.agent.set("build")
       lastSwitch = part.id
     } else if (part.tool === "plan_enter") {
-      local.agent.set("plan")
+      local.agent.set("lore planning")
       lastSwitch = part.id
     }
   })

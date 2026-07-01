@@ -1,13 +1,15 @@
-Use this tool when you have completed the planning phase and are ready to exit plan agent.
+Use this tool when you have completed the lore planning phase and are ready to
+exit the lore planning agent.
 
-This tool will ask the user if they want to switch to build agent to start implementing the plan.
+This tool will ask the user if they want to switch to the build agent to start
+writing the character card from the plan.
 
 Call this tool:
-- After you have written a complete plan to the plan file
-- After you have clarified any questions with the user
-- When you are confident the plan is ready for implementation
+- After you have written a complete character plan to the plan file
+- After you have clarified any open questions with the user
+- When you are confident the plan is ready to build from
 
 Do NOT call this tool:
 - Before you have created or finalized the plan
-- If you still have unanswered questions about the implementation
-- If the user has indicated they want to continue planning
+- If you still have unanswered questions about the character
+- If the user has indicated they want to keep planning

@@ -153,9 +153,9 @@ const layer = Layer.effect(
             mode: "primary",
             native: true,
           },
-          plan: {
-            name: "plan",
-            description: "Plan mode. Disallows all edit tools.",
+          "lore planning": {
+            name: "lore planning",
+            description: "Lore planning mode. Brainstorm character lore, personality, and appearance. Disallows edits.",
             options: {},
             permission: Permission.merge(
               defaults,
