@@ -88,7 +88,6 @@ export type ResolveOptions = Schema.Schema.Type<typeof ResolveOptions>
 export function resolve(input: Info, options: ResolveOptions): Resolved {
   const keybinds: TuiKeybind.KeybindOverrides = { ...input.keybinds }
   if (!options.terminalSuspend) {
-    keybinds.terminal_suspend = "none"
     if (keybinds.input_undo === undefined) {
       const inputUndo = TuiKeybind.defaultValue("input_undo")
       keybinds.input_undo = ["ctrl+z", ...(typeof inputUndo === "string" ? inputUndo.split(",") : [])]

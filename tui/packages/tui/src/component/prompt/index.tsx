@@ -327,6 +327,16 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  // Drop a starter template into the composer (optionally switching agent first)
+  // for the card-authoring slash commands below.
+  const fillPrompt = (text: string, agent?: string) => {
+    dialog.clear()
+    if (agent) local.agent.set(agent)
+    input.setText(text)
+    setStore("prompt", { input: text, parts: [] })
+    input.gotoBufferEnd()
+  }
+
   const promptCommands = createMemo(() =>
     [
       {
@@ -528,14 +538,58 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Warp",
-        desc: "Change the workspace for the session",
-        name: "workspace.set",
-        category: "Session",
-        enabled: Flag.OPENCODE_EXPERIMENTAL_WORKSPACES,
-        slashName: "warp",
+        title: "New character card",
+        desc: "Scaffold a new card and switch to the peak author",
+        name: "card.scaffold",
+        category: "Cards",
+        slashName: "card",
+        slashAliases: ["newcard"],
         run: () => {
-          workspace.open()
+          fillPrompt(
+            [
+              "Create a new character card.",
+              "",
+              "Concept: <describe the character in a line or two>",
+              "",
+              "Build it out fully — personality (shown through specifics and contradictions, not adjective lists), appearance, the slice of backstory that still shapes them now, a distinct speech style with example lines, and a scenario. Finish with an opening message that drops {{user}} into a live scene without acting or speaking for them.",
+            ].join("\n"),
+            "peak",
+          )
+        },
+      },
+      {
+        title: "De-slop rewrite",
+        desc: "Rewrite the current card to cut AI tells and bloat",
+        name: "card.rewrite",
+        category: "Cards",
+        slashName: "rewrite",
+        slashAliases: ["deslop"],
+        run: () => {
+          fillPrompt(
+            [
+              "Rewrite this character card to cut AI tells, clichés, purple prose, adjective-list personality, and token bloat. Keep the character's core intact, sharpen the voice, and never write actions or dialogue for {{user}}.",
+              "",
+              "<paste the card here, or attach the card file>",
+            ].join("\n"),
+            "peak",
+          )
+        },
+      },
+      {
+        title: "Find contradictions",
+        desc: "Scan the current card for internal inconsistencies",
+        name: "card.contradictions",
+        category: "Cards",
+        slashName: "contradictions",
+        slashAliases: ["contradict"],
+        run: () => {
+          fillPrompt(
+            [
+              "Review this character card for internal contradictions and inconsistencies — personality traits that clash with the example dialogue, backstory or timeline details that don't line up, appearance conflicts, or a voice that drifts. List each one with the conflicting lines, then suggest a fix.",
+              "",
+              "<paste the card here, or attach the card file>",
+            ].join("\n"),
+          )
         },
       },
       {
@@ -569,7 +623,6 @@ export function Prompt(props: PromptProps) {
       "prompt.stash.list",
       "prompt.skills",
       "session.interrupt",
-      "workspace.set",
       "session.move",
     ]),
   }))

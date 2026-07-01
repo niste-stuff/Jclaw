@@ -46,7 +46,6 @@ import { DialogThemeList } from "./component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { DialogAgent } from "./component/dialog-agent"
 import { DialogSessionList } from "./component/dialog-session-list"
-import { DialogWorkspaceList } from "./component/dialog-workspace-list"
 import { DialogConsoleOrg } from "./component/dialog-console-org"
 import { ThemeProvider, useTheme } from "./context/theme"
 import { Home } from "./routes/home"
@@ -120,18 +119,9 @@ const appBindingCommands = [
   "theme.mode.lock",
   "help.show",
   "docs.open",
-  "diff.open",
-  "workspace.list",
-  "app.debug",
-  "app.console",
-  "app.heap_snapshot",
-  "terminal.suspend",
   "terminal.title.toggle",
   "app.toggle.animations",
-  "app.toggle.file_context",
-  "app.toggle.diffwrap",
   "app.toggle.paste_summary",
-  "app.toggle.session_directory_filter",
 ] as const
 
 export type TuiInput = {
@@ -544,13 +534,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   )
 
   const connected = useConnected()
-  const currentWorktreeWorkspace = createMemo(() => {
-    const workspaceID = project.workspace.current()
-    if (!workspaceID) return
-    const workspace = project.workspace.get(workspaceID)
-    if (workspace?.type !== "worktree" || !workspace.directory) return
-    return workspace
-  })
   const appCommands = createMemo(() =>
     [
       {
@@ -585,31 +568,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             type: "home",
           })
           dialog.clear()
-        },
-      },
-      {
-        name: "workspace.copy_path",
-        title: "Copy worktree path",
-        category: "Workspace",
-        enabled: () => currentWorktreeWorkspace() !== undefined,
-        run: async () => {
-          const workspace = currentWorktreeWorkspace()
-          if (!workspace?.directory) return
-          await clipboard
-            .write?.(workspace.directory)
-            .then(() => toast.show({ message: "Copied worktree path", variant: "info" }))
-            .catch(toast.error)
-          dialog.clear()
-        },
-      },
-      {
-        name: "workspace.list",
-        title: "Manage workspaces",
-        category: "Workspace",
-        hidden: !Flag.OPENCODE_EXPERIMENTAL_WORKSPACES,
-        slashName: "workspaces",
-        run: () => {
-          dialog.replace(() => <DialogWorkspaceList />)
         },
       },
       ...Array.from({ length: 9 }, (_, i) => ({
@@ -807,9 +765,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         run: () => {
           // jclaw has no docs site; open jclaw's own docs. Override with
           // JCLAW_DOCS_URL, else fall back to the repo README on disk.
-          const docs =
-            process.env["JCLAW_DOCS_URL"] ??
-            new URL("../../../../README.md", import.meta.url).href
+          const docs = process.env["JCLAW_DOCS_URL"] ?? new URL("../../../../README.md", import.meta.url).href
           open(docs).catch(() => {})
           dialog.clear()
         },
@@ -822,50 +778,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashAliases: ["quit", "q"],
         run: () => exit(),
         category: "System",
-      },
-      {
-        name: "app.debug",
-        title: "Toggle debug panel",
-        category: "System",
-        run: () => {
-          renderer.toggleDebugOverlay()
-          dialog.clear()
-        },
-      },
-      {
-        name: "app.console",
-        title: "Toggle console",
-        category: "System",
-        run: () => {
-          renderer.console.toggle()
-          dialog.clear()
-        },
-      },
-      {
-        name: "app.heap_snapshot",
-        title: "Write heap snapshot",
-        category: "System",
-        run: async () => {
-          const files = await props.onSnapshot?.()
-          toast.show({
-            variant: "info",
-            message: `Heap snapshot written to ${files?.join(", ")}`,
-            duration: 5000,
-          })
-          dialog.clear()
-        },
-      },
-      {
-        name: "terminal.suspend",
-        title: "Suspend terminal",
-        category: "System",
-        hidden: true,
-        enabled: process.platform !== "win32",
-        run: () => {
-          renderer.suspend()
-          process.once("SIGCONT", () => renderer.resume())
-          process.kill(0, "SIGTSTP")
-        },
       },
       {
         name: "terminal.title.toggle",
@@ -891,25 +803,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
-        name: "app.toggle.file_context",
-        title: kv.get("file_context_enabled", true) ? "Disable file context" : "Enable file context",
-        category: "System",
-        run: () => {
-          kv.set("file_context_enabled", !kv.get("file_context_enabled", true))
-          dialog.clear()
-        },
-      },
-      {
-        name: "app.toggle.diffwrap",
-        title: kv.get("diff_wrap_mode", "word") === "word" ? "Disable diff wrapping" : "Enable diff wrapping",
-        category: "System",
-        run: () => {
-          const current = kv.get("diff_wrap_mode", "word")
-          kv.set("diff_wrap_mode", current === "word" ? "none" : "word")
-          dialog.clear()
-        },
-      },
-      {
         name: "app.toggle.paste_summary",
         title: pasteSummaryEnabled() ? "Disable paste summary" : "Enable paste summary",
         category: "System",
@@ -919,18 +812,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             kv.set("paste_summary_enabled", next)
             return next
           })
-          dialog.clear()
-        },
-      },
-      {
-        name: "app.toggle.session_directory_filter",
-        title: kv.get("session_directory_filter_enabled", true)
-          ? "Disable session directory filtering"
-          : "Enable session directory filtering",
-        category: "System",
-        run: async () => {
-          kv.set("session_directory_filter_enabled", !kv.get("session_directory_filter_enabled", true))
-          await sync.session.refresh()
           dialog.clear()
         },
       },

@@ -13,7 +13,10 @@ import { useTuiConfig } from "../config"
 type PaletteCommandEntry = ReturnType<OpenTuiKeymap["getCommandEntries"]>[number]
 
 function isVisiblePaletteCommand(command: PaletteCommandEntry["command"]) {
-  return command.hidden !== true && command.name !== COMMAND_PALETTE_COMMAND
+  if (command.hidden === true || command.name === COMMAND_PALETTE_COMMAND) return false
+  // Only surface commands that also have a "/" slash form, so the palette stays
+  // in sync with the "/" popup instead of listing extra keybind-only actions.
+  return typeof command.slashName === "string" && command.slashName.length > 0
 }
 
 function isSuggestedPaletteCommand(entry: PaletteCommandEntry) {
@@ -48,7 +51,8 @@ export function CommandPaletteDialog() {
   const options = createMemo(() =>
     entries().map((entry) => ({
       title: typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
-      description: typeof entry.command.desc === "string" ? entry.command.desc : undefined,
+      // Palette shows the keybind footer only — no description text.
+      description: undefined,
       category: typeof entry.command.category === "string" ? entry.command.category : undefined,
       footer: formatKeyBindings(entry.bindings, config),
       value: entry.command.name,

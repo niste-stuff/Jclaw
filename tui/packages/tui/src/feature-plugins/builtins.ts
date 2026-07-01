@@ -7,9 +7,7 @@ import SidebarFooter from "./sidebar/footer"
 import SidebarLsp from "./sidebar/lsp"
 import SidebarMcp from "./sidebar/mcp"
 import SidebarTodo from "./sidebar/todo"
-import DiffViewer from "./system/diff-viewer"
 import Notifications from "./system/notifications"
-import PluginManager from "./system/plugins"
 import WhichKey from "./system/which-key"
 
 export type BuiltinTuiPlugin = Omit<TuiPluginModule, "id"> & {
@@ -29,8 +27,6 @@ export function createBuiltinPlugins(options: { experimentalEventSystem: boolean
     SidebarFiles,
     SidebarFooter,
     Notifications,
-    PluginManager,
     WhichKey,
-    DiffViewer,
   ]
 }
