@@ -9,9 +9,16 @@
 //
 // ─── Add your splash texts here ───────────────────────────────────────────
 export const SPLASH_TEXTS: string[] = [
-  "Welcome back to jclaw.",
-  "Ready when you are.",
-  "Let's write a great character card.",
-  "Tip: type {highlight}/help{/highlight} to see everything jclaw can do.",
-  "Running on free models via {highlight}OpenCode Zen{/highlight}.",
+  "Well well well, look what we have here.",
+  "Zamnnnn",
+  "Goonmetheus... what?",
+  "Tip: Probably don't kill yourself soon.",
+  "I proclaim my love for Claude by Anthropic.",
+  "Why are you gae?",
+  "Son...",
+  "Jclaw kinda peak ngl.",
+  "pluhhhh",
+  "おはようございます",
+  "你好吗",
+  "Made by Niste, fork of claw-code and opencode <3",
 ]
