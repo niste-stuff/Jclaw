@@ -48,6 +48,16 @@ export function recentModels(
     .map((item) => ({ providerID: item.providerID, modelID: item.modelID }))
 }
 
+// "lore planning" and "peak" are prompt-only presets: they should just use
+// whatever model you have selected rather than keeping their own. Route their
+// model reads/writes to the base "build" agent's slot so switching to them
+// keeps the current model, and changing the model anywhere applies to all.
+const PRESET_AGENTS = new Set(["lore planning", "peak"])
+const SHARED_MODEL_KEY = "build"
+export function modelKey(agentName: string) {
+  return PRESET_AGENTS.has(agentName) ? SHARED_MODEL_KEY : agentName
+}
+
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
   init: () => {
@@ -237,7 +247,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         const a = agent.current()
         return (
           getFirstValidModel(
-            () => a && modelStore.model[a.name],
+            () => a && modelStore.model[modelKey(a.name)],
             () => a && a.model,
             fallbackModel,
           ) ?? undefined
@@ -285,7 +295,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (!val) return
           const a = agent.current()
           if (!a) return
-          setModelStore("model", a.name, { ...val })
+          setModelStore("model", modelKey(a.name), { ...val })
         },
         cycleFavorite(direction: 1 | -1) {
           const favorites = modelStore.favorite.filter((item) => isModelValid(item))
@@ -313,7 +323,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (!next) return
           const a = agent.current()
           if (!a) return
-          setModelStore("model", a.name, { ...next })
+          setModelStore("model", modelKey(a.name), { ...next })
           setModelStore("recent", recentModels(next, modelStore.recent))
           save()
         },
@@ -329,7 +339,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             }
             const a = agent.current()
             if (!a) return
-            setModelStore("model", a.name, model)
+            setModelStore("model", modelKey(a.name), model)
             if (options?.recent) {
               setModelStore("recent", recentModels(model, modelStore.recent))
               save()
