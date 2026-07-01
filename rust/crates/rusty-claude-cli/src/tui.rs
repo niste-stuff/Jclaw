@@ -53,6 +53,15 @@ pub fn run_tui(args: &[String]) -> Result<(), Box<dyn Error>> {
         // Marker so the front end can branch on being launched by jclaw.
         .env("JCLAW_TUI", "1");
 
+    // Bun's `--cwd` points at the vendored package (so its deps and the opentui
+    // preload resolve), which would otherwise make the TUI treat that package as
+    // the project. Pass the user's actual directory as the `[project]` positional
+    // so `cd <dir> && jclaw` opens there. A project the user named explicitly
+    // still wins — it appears earlier in argv and the TUI takes the first one.
+    if let Ok(cwd) = std::env::current_dir() {
+        command.arg(cwd);
+    }
+
     exec_replacing(command, &bun)
 }
 

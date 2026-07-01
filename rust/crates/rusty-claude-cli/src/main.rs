@@ -1021,6 +1021,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if args.first().map(String::as_str) == Some("tui") {
         return tui::run_tui(&args[1..]);
     }
+    // The `jclaw` command with no subcommand launches the TUI in the current
+    // directory, so `cd <project> && jclaw` opens the TUI there. Only the
+    // `jclaw` binary does this; bare `claw`/`claw-janitor` keep their behavior.
+    if args.is_empty() && invoked_cli_name() == "jclaw" {
+        return tui::run_tui(&[]);
+    }
     // #824: suppress config deprecation prose warnings to stderr when JSON
     // output mode is active.  Scan the raw argv before parse_args so the
     // suppression is in place before any settings file is loaded.
