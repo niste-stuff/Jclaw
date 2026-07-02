@@ -5,9 +5,8 @@
 wired a Rust launcher (`claw tui`), and rebranded the user-facing surface to jclaw
 **without breaking the OpenCode Zen free-model backend**.
 
-The user-facing rebrand + the first round of jclaw-specific features are **done and
-committed** on branch `jclaw-rebrand-sweep` (see §3). That branch is **not merged to
-`main`** yet — merge with `git checkout main && git merge jclaw-rebrand-sweep`.
+The user-facing rebrand, the jclaw-specific features, and a full debug audit (see §3) are
+**done and merged to `main`** (fast-forward from `jclaw-rebrand-sweep` at `42d4ee0`).
 
 ---
 
