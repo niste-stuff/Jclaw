@@ -57,7 +57,8 @@ opencode GitHub-agent infrastructure (`github.handler.ts`).
 
 ---
 
-## 3. Done on branch `jclaw-rebrand-sweep` (items 1–8 first session; 9–13 the audit/feature session)
+## 3. Done on branch `jclaw-rebrand-sweep` (items 1–8 first session; 9–13 the audit/feature session;
+14–16 the theming/provider/upsell session, direct to `main`)
 
 Verified via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, the live server
 `/agent` endpoint, and (since item 10) the full bun test suites of all vendored packages.
@@ -130,7 +131,7 @@ Verified via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, th
 13. `544ee14` **Light-mode theme contrast fix** — textMuted/primary/accent were below 4.5:1 on
    the light background; now ~5:1. Dark mode was already fine.
 
-14. *(uncommitted)* **Added a `catppuccin-latte` theme** — the official Catppuccin *light* flavor
+14. `47e29fa` **Added a `catppuccin-latte` theme** — the official Catppuccin *light* flavor
     (`packages/tui/src/theme/assets/catppuccin-latte.json`, registered in `theme/index.ts`).
     Authored light-only (same value for both `dark`/`light` keys, like the other catppuccin
     flavors) with light diff-highlight backgrounds so it renders correctly on a light base.
@@ -138,7 +139,7 @@ Verified via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, th
     (`catppuccin-macchiato`) being **dark-only** — its light and dark palettes are identical, so
     the `/mode` toggle had nothing different to show. See §5.
 
-15. *(uncommitted)* **Promoted OpenRouter, demoted OpenCode Zen/Go to the general provider list.**
+15. `47e29fa` **Promoted OpenRouter, demoted OpenCode Zen/Go to the general provider list.**
     OpenRouter is already in the models.dev catalog (`id: openrouter`, `OPENROUTER_API_KEY`,
     `https://openrouter.ai/api/v1`) — natively BYOK, no code needed to "add" it; it was just not
     surfaced. Changes: `component/dialog-provider.tsx` `PROVIDER_PRIORITY` now leads with
@@ -151,7 +152,7 @@ Verified via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, th
     Zen/Go *display names* → "OpenRouter" (in `provider/provider.ts`) was **reverted** in favor of
     the real provider — do not re-add it.
 
-16. *(uncommitted)* **Dropped the "Subscribe to OpenCode Go" free-tier upsell.** On a
+16. `47e29fa` **Dropped the "Subscribe to OpenCode Go" free-tier upsell.** On a
     `FreeUsageLimitError`, `session/retry.ts` now returns a plain `{ message: "Free usage limit
     reached" }` instead of the Go upsell action/link; removed the now-unused `GO_UPSELL_MESSAGE`
     /`GO_UPSELL_URL` constants. Since no `free_tier_limit` action is emitted anymore, the TUI
