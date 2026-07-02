@@ -7,9 +7,8 @@ wired a Rust launcher (`claw tui`), and rebranded the user-facing surface to jcl
 
 The user-facing rebrand, the jclaw-specific features, and a full debug audit (see §3) are
 **done and merged to `main`** (fast-forward from `jclaw-rebrand-sweep` at `42d4ee0`).
-Items 1–16 are on `main`. **Item 17 (card/lorebook model rebuild + lorebook authoring) is
-uncommitted** as of this write-up — typechecked but not yet run through `bun test` or the
-boot probe.
+Items 1–19 are on `main`, all committed. **Items 17–18 are typechecked only** — not yet run
+through `bun test` or the boot probe (see §8).
 
 ---
 
@@ -165,7 +164,7 @@ Verified via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, th
     dialog for actual Go users, and the `packages/ui` web-UI i18n `dialog.usageExceeded.freeTier.*`
     keys (separate web surface, typed i18n contract across 6+ locales — not the TUI).
 
-17. **UNCOMMITTED** — **Rebuilt the card/lorebook understanding baked into `peak`/`build`/
+17. `8d16b9a` **Rebuilt the card/lorebook understanding baked into `peak`/`build`/
     `lore planning`, empirically, and added lorebook authoring.** Not a code-audit session —
     the user fed real JanitorAI cards and a real lorebook from
     `card-corpus/` (untracked, gitignored-by-absence, personal reference set — see
@@ -217,6 +216,36 @@ Verified via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, th
       valid, schema-complete JSON. **NOT verified this session:** the full `bun test` suite and
       the headless `serve` + `/agent` boot probe (§6) — item 10's "all 8 package suites pass"
       predates this work and should be re-run before calling this done.
+
+18. `0baafdb` **Workspace-scoping + format-matching guidance for `peak`/`build`; restyled
+    placeholder examples.** Added two behavioral rules (not corpus-derived rubric, so no
+    convergence cycle needed): neither agent should browse the workspace on its own when
+    authoring/rewriting a card — work only from files the user names or hands over, never a
+    self-directed search through other cards for context. And "same format/style as X" means
+    matching X's box-formatting conventions and prose register (close in shape), never a
+    line-for-line cadence match or lifted content. Also swapped the coding-flavored placeholder
+    examples for card/roleplay ones: home screen's rotating set
+    (`packages/tui/src/routes/home.tsx`, was "Fix a TODO in the codebase" etc.) and the `claw
+    run` command's matching hardcoded placeholder (`cli/cmd/run/footer.prompt.tsx`).
+19. `0b6066d` **Stripped claw-code/opencode cosmetic cruft from the repo root, rewrote
+    README.** Not a `tui/` change (repo root), but part of the same fork-cleanup arc. Deleted
+    ~15k lines / 6.5 MB of upstream marketing docs and dead tooling: `ROADMAP.md` (1.1 MB),
+    `PARITY.md`, `PHILOSOPHY.md`, `USAGE.md`, `how_to_run.md`, `concept.md`, `prd.json`,
+    `progress.txt`, `DECISIONS.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`,
+    `SUPPORT.md`, `Containerfile`, `docker-compose.yml`, `.dockerignore`, `install.sh` (claw-
+    code's own installer — jclaw uses `scripts/install-jclaw.sh`), and the whole `docs/`
+    (claw-code's `g00x` verification maps) and `assets/` (upstream marketing images) dirs.
+    Verified first that every rust/CI reference to these files is a prose comment or a test-
+    assertion string literal, never `fs::read`/`include_str!`, so the Rust build/test/clippy
+    gates are unaffected. **Kept** `LICENSE` (required — fork attribution) and `CLAUDE.md`.
+    **Rewrote** `README.md` to describe jclaw itself, keeping a short upstream-attribution
+    note so the MIT provenance `DECISIONS.md` used to document isn't lost. **Left for a
+    possible follow-up** (functional, not cosmetic, so out of scope here): root `src/`/`tests/`
+    — claw-code's original dead Python implementation (68 `.py` + 32 `.json`, still referenced
+    by `CLAUDE.md`); `scripts/roadmap-*.sh` + `cc2_board.py`/`generate_cc2_board.py`/
+    `validate_cc2_board.py` (served the now-deleted `ROADMAP.md`); `.github/` workflows +
+    `check_doc_source_of_truth.py` (that CI check references the deleted `assets/claw-
+    hero.jpeg` + old README — would fail if Actions run today).
 
 Earlier (pre-session, already on `main`): logo wordmark, `scriptName("claw")`, terminal window
 title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
@@ -324,10 +353,13 @@ title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
 ## 8. Possible next steps
 
 - **Before anything else touches `tui/`**: run `bun test` (all vendored packages) and the
-  headless boot probe for item 17's changes — they've only been typechecked so far, per §3.
+  headless boot probe for items 17–18's changes — they've only been typechecked so far, per §3.
 - Optional polish (ask user): pin a stronger model to `peak`; refine the jclaw logo glyphs.
 - Config isolation (only if the user changes their mind): flip `app` in
   `packages/core/src/global.ts` to `"jclaw"` for its own XDG dirs — loses inherited Zen setup.
 - The user's disk is nearly full (see §7) — worth flagging if test failures reappear.
 - Card/lorebook work has more room to grow if the user brings more corpus examples — see
   project memory `card-corpus-reference` for what's already been reviewed.
+- Item 19 named a follow-up cleanup pass (root `src/`/`tests/` dead Python, stale
+  `scripts/roadmap-*`/`cc2_board*` tooling, `.github/` CI referencing deleted files) — ask
+  before touching, since it's functional (CI-wired) rather than pure cosmetics.
