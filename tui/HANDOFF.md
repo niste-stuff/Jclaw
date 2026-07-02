@@ -58,7 +58,7 @@ opencode GitHub-agent infrastructure (`github.handler.ts`).
 
 ---
 
-## 3. Done this session (branch `jclaw-rebrand-sweep`, 7 commits on top of `main`)
+## 3. Done this session (branch `jclaw-rebrand-sweep`, 8 commits on top of `main`)
 
 Verified throughout via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, and
 the live server `/agent` endpoint. `main`'s tip was `d1aa5fa`.
@@ -94,6 +94,20 @@ the live server `/agent` endpoint. `main`'s tip was `d1aa5fa`.
    per agent name (`modelStore.model[agentName]` in `context/local.tsx`); a new `modelKey()`
    helper routes those two presets to the shared `build` model slot for reads + all setters, so
    switching to them keeps the current model and changing the model applies across all three.
+8. `4680cac` **Pruned dev/infra commands, added card-authoring commands, tidied the palette.**
+   Removed everything with no value to card authoring: the plugin manager and diff-viewer
+   builtins (unregistered from `feature-plugins/builtins.ts`), the debug/console/heap-snapshot
+   and terminal-suspend dev actions, the git worktree/workspace commands (`workspace.copy_path`,
+   `workspace.list`, `workspace.set`/Warp), and the file-context/diffwrap/session-directory-
+   filter toggles — erased at all three coupling points (command def in `app.tsx` or
+   `component/prompt/index.tsx`, the keybind gather array, and `config/keybind.ts`
+   `Definitions`/`CommandMap`). Added three new `/` commands in `component/prompt/index.tsx`
+   (category "Cards") that prefill the composer via a `fillPrompt` helper: `/card` (scaffold a
+   new card, switches to `peak`), `/rewrite` (de-slop the current card, switches to `peak`),
+   `/contradictions` (scan for internal inconsistencies, stays on current agent). Tidied
+   `command-palette.tsx` (the `ctrl+p` dialog) to match the `/` popup: commands need a
+   `slashName` to appear in the palette, and the palette no longer shows description text (just
+   title + keybind footer).
 
 Earlier (pre-session, already on `main`): logo wordmark, `scriptName("claw")`, terminal window
 title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
@@ -129,6 +143,17 @@ title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
 - The **default agent model** for `peak`/`lore planning` is whatever you've selected (free
   DeepSeek V4 Flash via Zen by default). Pin a stronger model to `peak` by adding a `model:` to
   its `agent/agent.ts` entry if desired.
+- **Command wiring (palette / `/` popup / keybinds) — one command definition drives all three.**
+  Commands are registered via `useBindings({ commands: [...] })` scattered across several files
+  (`app.tsx`, `component/prompt/index.tsx`, `routes/session/index.tsx`,
+  `feature-plugins/system/*.tsx`); each entry needs `namespace: "palette"` to reach the `ctrl+p`
+  dialog, and a `slashName` to also reach the `/` popup (`command-palette.tsx` now requires
+  `slashName` to show in `ctrl+p` too, so the two lists stay identical). A keybind needs a
+  matching entry in `config/keybind.ts` (`Definitions` + `CommandMap`) *and* the command name
+  added to the relevant `keymap.gather(...)` array in the file that registers it — removing a
+  command means deleting it in all three places or you'll get a dangling reference.
+  `noUnusedLocals` is off in `tui/tsconfig.json`, so an orphaned import after removing a command
+  won't fail typecheck — grep for stray references by hand.
 
 ---
 
@@ -176,5 +201,12 @@ title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
 - Optional polish (ask user): pin a stronger model to `peak`; refine the jclaw logo glyphs;
   refine the jclaw theme colors; decide whether `build` should also be repurposed for jclaw
   (it currently uses opencode's default coding system prompt).
+- The `slashName`-required palette filter (§3 item 8) dropped several keybind-only commands out
+  of `ctrl+p` (they still work via their bound key, they just don't list in the dialog anymore):
+  auto-approve permissions, copy last assistant message, remove editor context, theme
+  light/dark switch + lock, several display toggles (sidebar, code concealment, tool details,
+  scrollbar, generic tool output, animations, paste summary, terminal title, tips), open docs,
+  variant cycle. If any of these should be palette-reachable again, give it a `slashName` (adds
+  it to the `/` popup too) rather than special-casing the palette filter.
 - Config isolation (only if the user changes their mind): flip `app` in
   `packages/core/src/global.ts` to `"jclaw"` for its own XDG dirs — loses inherited Zen setup.
