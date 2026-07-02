@@ -478,14 +478,12 @@ it.instance("resolves keybind lookup from canonical keybinds", () =>
         keybinds: {
           leader: { key: { name: "g", ctrl: true } },
           command_list: "alt+p",
-          diff_open: "ctrl+j",
           which_key_toggle: "alt+k",
           editor_open: "ctrl+e",
           "prompt.autocomplete.next": "ctrl+j",
           "dialog.prompt.submit": "ctrl+s",
           "dialog.mcp.toggle": "ctrl+t",
           model_favorite_toggle: "ctrl+f",
-          "dialog.plugins.install": "shift+i",
         },
         leader_timeout: 1234,
       })
@@ -494,7 +492,6 @@ it.instance("resolves keybind lookup from canonical keybinds", () =>
       expect(config.keybinds.get("leader")?.[0]?.key).toEqual({ name: "g", ctrl: true })
       expect(config.leader_timeout).toBe(1234)
       expect(config.keybinds.get("command.palette.show")?.[0]?.key).toBe("alt+p")
-      expect(config.keybinds.get("diff.open")?.[0]?.key).toBe("ctrl+j")
       expect(config.keybinds.get("session.new")?.[0]?.key).toBe("<leader>n")
       expect(config.keybinds.get("which-key.toggle")?.[0]?.key).toBe("alt+k")
       expect(config.keybinds.get("which-key.layout.toggle")?.[0]?.key).toBe("ctrl+alt+shift+k")
@@ -508,10 +505,9 @@ it.instance("resolves keybind lookup from canonical keybinds", () =>
       expect(config.keybinds.get("dialog.prompt.submit")?.[0]?.key).toBe("ctrl+s")
       expect(config.keybinds.get("dialog.mcp.toggle")?.[0]?.key).toBe("ctrl+t")
       expect(config.keybinds.get("model.dialog.favorite")?.[0]?.key).toBe("ctrl+f")
-      expect(config.keybinds.get("dialog.plugins.install")?.[0]?.key).toBe("shift+i")
-      expect(
-        config.keybinds.gather("plugins.dialog", ["dialog.plugins.install"]).map((binding) => binding.cmd),
-      ).toEqual(["dialog.plugins.install"])
+      expect(config.keybinds.gather("mcp.dialog", ["dialog.mcp.toggle"]).map((binding) => binding.cmd)).toEqual([
+        "dialog.mcp.toggle",
+      ])
     }),
   ),
 )
@@ -526,7 +522,7 @@ it.instance("keybinds accept OpenTUI binding specs", () =>
           command_list: [{ key: "alt+p", preventDefault: false }],
           editor_open: { key: { name: "e", ctrl: true }, group: "Explicit" },
           "prompt.autocomplete.next": false,
-          plugin_manager: "ctrl+shift+p",
+          session_list: "ctrl+shift+p",
         },
       })
 
@@ -540,7 +536,7 @@ it.instance("keybinds accept OpenTUI binding specs", () =>
         group: "Explicit",
       })
       expect(config.keybinds.get("prompt.autocomplete.next")).toEqual([])
-      expect(config.keybinds.get("plugins.list")?.[0]?.key).toBe("ctrl+shift+p")
+      expect(config.keybinds.get("session.list")?.[0]?.key).toBe("ctrl+shift+p")
     }),
   ),
 )

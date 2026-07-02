@@ -231,7 +231,7 @@ test("loads disabled-by-default internal plugin inactive and activates on demand
   try {
     await TuiPluginRuntime.init({ api, config })
 
-    expect(TuiPluginRuntime.list().find((item) => item.id === "internal:plugin-manager")).toMatchObject({
+    expect(TuiPluginRuntime.list().find((item) => item.id === "internal:home-tips")).toMatchObject({
       enabled: true,
       active: true,
     })

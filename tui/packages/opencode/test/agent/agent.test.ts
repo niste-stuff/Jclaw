@@ -49,7 +49,8 @@ it.instance("returns default native agents when no config", () =>
     const agents = yield* load((svc) => svc.list())
     const names = agents.map((a) => a.name)
     expect(names).toContain("build")
-    expect(names).toContain("plan")
+    expect(names).toContain("lore planning")
+    expect(names).toContain("peak")
     expect(names).toContain("general")
     expect(names).toContain("explore")
     expect(names).toContain("compaction")
@@ -69,9 +70,9 @@ it.instance("build agent has correct default properties", () =>
   }),
 )
 
-it.instance("plan agent denies edits except .opencode/plans/*", () =>
+it.instance("lore planning agent denies edits except .opencode/plans/*", () =>
   Effect.gen(function* () {
-    const plan = yield* load((svc) => svc.get("plan"))
+    const plan = yield* load((svc) => svc.get("lore planning"))
     expect(plan).toBeDefined()
     // Wildcard is denied
     expect(evalPerm(plan, "edit")).toBe("deny")
@@ -80,9 +81,9 @@ it.instance("plan agent denies edits except .opencode/plans/*", () =>
   }),
 )
 
-it.instance("plan agent denies the general subagent by default", () =>
+it.instance("lore planning agent denies the general subagent by default", () =>
   Effect.gen(function* () {
-    const plan = yield* load((svc) => svc.get("plan"))
+    const plan = yield* load((svc) => svc.get("lore planning"))
     expect(plan).toBeDefined()
     expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("deny")
     expect(Permission.evaluate("task", "explore", plan!.permission).action).toBe("allow")
@@ -91,10 +92,10 @@ it.instance("plan agent denies the general subagent by default", () =>
 )
 
 it.instance(
-  "user permission can allow the general subagent from plan mode",
+  "user permission can allow the general subagent from lore planning mode",
   () =>
     Effect.gen(function* () {
-      const plan = yield* load((svc) => svc.get("plan"))
+      const plan = yield* load((svc) => svc.get("lore planning"))
       expect(plan).toBeDefined()
       expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("allow")
     }),
@@ -439,12 +440,12 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const names = (yield* load((svc) => svc.list())).map((a) => a.name)
-      expect(names[0]).toBe("plan")
+      expect(names[0]).toBe("lore planning")
       expect(names.slice(1)).toEqual(names.slice(1).toSorted((a, b) => a.localeCompare(b)))
     }),
   {
     config: {
-      default_agent: "plan",
+      default_agent: "lore planning",
       agent: {
         zebra: {
           description: "Zebra",
@@ -662,15 +663,15 @@ it.instance("defaultInfo returns resolved build agent when no default_agent conf
 )
 
 it.instance(
-  "defaultAgent respects default_agent config set to plan",
+  "defaultAgent respects default_agent config set to lore planning",
   () =>
     Effect.gen(function* () {
       const agent = yield* load((svc) => svc.defaultAgent())
-      expect(agent).toBe("plan")
+      expect(agent).toBe("lore planning")
     }),
   {
     config: {
-      default_agent: "plan",
+      default_agent: "lore planning",
     },
   },
 )
@@ -725,12 +726,12 @@ it.instance(
 )
 
 it.instance(
-  "defaultAgent returns plan when build is disabled and default_agent not set",
+  "defaultAgent returns lore planning when build is disabled and default_agent not set",
   () =>
     Effect.gen(function* () {
       const agent = yield* load((svc) => svc.defaultAgent())
-      // build is disabled, so it should return plan (next primary agent)
-      expect(agent).toBe("plan")
+      // build is disabled, so it should return lore planning (next primary agent)
+      expect(agent).toBe("lore planning")
     }),
   {
     config: {
@@ -748,7 +749,8 @@ it.instance(
     config: {
       agent: {
         build: { disable: true },
-        plan: { disable: true },
+        "lore planning": { disable: true },
+        peak: { disable: true },
       },
     },
   },
