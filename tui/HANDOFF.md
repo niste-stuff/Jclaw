@@ -58,10 +58,10 @@ opencode GitHub-agent infrastructure (`github.handler.ts`).
 
 ---
 
-## 3. Done this session (branch `jclaw-rebrand-sweep`, 8 commits on top of `main`)
+## 3. Done on branch `jclaw-rebrand-sweep` (items 1–8 first session; 9–13 the audit/feature session)
 
-Verified throughout via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, and
-the live server `/agent` endpoint. `main`'s tip was `d1aa5fa`.
+Verified via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, the live server
+`/agent` endpoint, and (since item 10) the full bun test suites of all vendored packages.
 
 1. `8b1af3a` **Finish the user-facing rebrand + disable opencode-only features.** Rebranded
    display strings across CLI `describe:`/output, home tips, permission dialogs (main + mini),
@@ -108,6 +108,28 @@ the live server `/agent` endpoint. `main`'s tip was `d1aa5fa`.
    `command-palette.tsx` (the `ctrl+p` dialog) to match the `/` popup: commands need a
    `slashName` to appear in the palette, and the palette no longer shows description text (just
    title + keybind footer).
+
+9. `0629ba4` **Fixed dead ctrl+z + removed the obsolete `terminalSuspend` option.** Found by
+   the audit: removing the suspend command left ctrl+z bound to nothing on macOS/Linux (the
+   ctrl+z→undo remap only ran on Windows). ctrl+z is now part of the `input_undo` default;
+   `resolve()` lost its options argument (callers in `config/tui.ts` + `run/runtime.boot.ts`
+   updated).
+10. `e2189e5` **Synced the vendored test suites** with the rebrand/agent/pruning changes (33
+   stale failures across tui/opencode/schema): claw epilogue + models-hint copy, jclaw
+   notification title + permission copy, plan → "lore planning" (+ peak in the roster),
+   removed diff/plugin keybinds, regenerated CLI help snapshots, event-manifest counts.
+   **All 8 package suites now pass** — treat `bun test` as a gate from now on.
+11. `94f9043` **Restored the palette-dropped commands** by giving them slash names (see §8's
+   old list): `/mode`, `/lockmode`, `/docs`, `/terminaltitle`, `/animations`, `/pastesummary`,
+   `/autoapprove` (alias `/yolo`), `/variantcycle`, `/sidebar`, `/conceal`, `/tooldetails`,
+   `/scrollbar`, `/tooloutput`, `/copylast`, `/clearcontext`, `/tips`. Also removed the `Flag`
+   import orphaned in `component/prompt/index.tsx` by the command pruning.
+12. `748331e` **Repurposed `build` as jclaw's workshop default** — new
+   `agent/prompt/build.txt` (replaces the opencode coding persona): general-purpose assistant,
+   card-library management, same no-slop bar as peak, routes brainstorming → `lore planning`
+   and whole-card writing → `peak`. Name/permissions/tools unchanged.
+13. `544ee14` **Light-mode theme contrast fix** — textMuted/primary/accent were below 4.5:1 on
+   the light background; now ~5:1. Dark mode was already fine.
 
 Earlier (pre-session, already on `main`): logo wordmark, `scriptName("claw")`, terminal window
 title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
@@ -166,6 +188,10 @@ title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
   - Deps: `bun install` (needs network; ~1 GB). `node_modules` is present on this machine.
   - **Typecheck (the TS build gate):** `bun run --cwd packages/tui typecheck` and
     `bun run --cwd packages/opencode typecheck` (each runs `tsgo --noEmit`). Both pass.
+  - **Tests (now a gate):** `bun test` in each vendored package that has tests (tui, opencode,
+    core, llm, schema, protocol, ui, http-recorder, effect-drizzle-sqlite). All pass as of
+    this session. Known flake: `test/server/httpapi-v2-pty.test.ts` can fail under full-suite
+    load (timing); it passes solo — rerun the file alone before blaming a change.
   - **Headless boot + agent list** (great end-to-end check):
     `bun run --cwd packages/opencode src/index.ts serve --port 14784 --print-logs`, then
     `curl -s http://127.0.0.1:14784/agent` (expect JSON incl. `lore planning`, `peak`). Kill
@@ -192,21 +218,17 @@ title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
 - Full-screen TUIs can't be driven from a non-TTY channel; use the render probe for automated
   checks and a real Terminal for interactive verification. Background the probe and grep its
   output file (foreground `sleep` is blocked by the harness).
+- **Disk pressure causes phantom test failures.** This machine's data volume runs near 100%
+  full; when free space drops to ~150 MB, snapshot/pty tests fail with confusing
+  `FileSystem.writeFile`/ENOSPC errors. Check `df -h /System/Volumes/Data` before debugging.
+  Safe space wins: `rust/target/debug` (~15 GB, regenerable — keep `target/release`, the
+  installed `jclaw` execs it) and `/var/folders/.../T/opencode-test-data-*`.
 
 ---
 
 ## 8. Possible next steps
 
-- Merge `jclaw-rebrand-sweep` into `main`.
-- Optional polish (ask user): pin a stronger model to `peak`; refine the jclaw logo glyphs;
-  refine the jclaw theme colors; decide whether `build` should also be repurposed for jclaw
-  (it currently uses opencode's default coding system prompt).
-- The `slashName`-required palette filter (§3 item 8) dropped several keybind-only commands out
-  of `ctrl+p` (they still work via their bound key, they just don't list in the dialog anymore):
-  auto-approve permissions, copy last assistant message, remove editor context, theme
-  light/dark switch + lock, several display toggles (sidebar, code concealment, tool details,
-  scrollbar, generic tool output, animations, paste summary, terminal title, tips), open docs,
-  variant cycle. If any of these should be palette-reachable again, give it a `slashName` (adds
-  it to the `/` popup too) rather than special-casing the palette filter.
+- Optional polish (ask user): pin a stronger model to `peak`; refine the jclaw logo glyphs.
 - Config isolation (only if the user changes their mind): flip `app` in
   `packages/core/src/global.ts` to `"jclaw"` for its own XDG dirs — loses inherited Zen setup.
+- The user's disk is nearly full (see §7) — worth flagging if test failures reappear.
