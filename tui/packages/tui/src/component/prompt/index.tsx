@@ -14,7 +14,6 @@ import "opentui-spinner/solid"
 import path from "path"
 import { fileURLToPath } from "url"
 import { useLocal } from "../../context/local"
-import { Flag } from "@opencode-ai/core/flag/flag"
 import { tint, useTheme } from "../../context/theme"
 import { EmptyBorder, SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
@@ -365,6 +364,7 @@ export function Prompt(props: PromptProps) {
       {
         title: "Remove editor context",
         name: "prompt.editor_context.clear",
+        slashName: "clearcontext",
         category: "Prompt",
         enabled: Boolean(editorContext()),
         run: () => {

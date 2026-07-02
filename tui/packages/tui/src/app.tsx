@@ -657,6 +657,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "variant.cycle",
         title: "Variant cycle",
+        slashName: "variantcycle",
         category: "Agent",
         run: () => {
           local.model.variant.cycle()
@@ -734,6 +735,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "theme.switch_mode",
         title: mode() === "dark" ? "Switch to light mode" : "Switch to dark mode",
+        slashName: "mode",
+        slashAliases: ["light", "dark"],
         run: () => {
           setMode(mode() === "dark" ? "light" : "dark")
           dialog.clear()
@@ -743,6 +746,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "theme.mode.lock",
         title: locked() ? "Unlock theme mode" : "Lock theme mode",
+        slashName: "lockmode",
         run: () => {
           if (locked()) unlock()
           else lock()
@@ -762,6 +766,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "docs.open",
         title: "Open docs",
+        slashName: "docs",
         run: () => {
           // jclaw has no docs site; open jclaw's own docs. Override with
           // JCLAW_DOCS_URL, else fall back to the repo README on disk.
@@ -782,6 +787,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "terminal.title.toggle",
         title: terminalTitleEnabled() ? "Disable terminal title" : "Enable terminal title",
+        slashName: "terminaltitle",
         category: "System",
         run: () => {
           setTerminalTitleEnabled((prev) => {
@@ -796,6 +802,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "app.toggle.animations",
         title: kv.get("animations_enabled", true) ? "Disable animations" : "Enable animations",
+        slashName: "animations",
         category: "System",
         run: () => {
           kv.set("animations_enabled", !kv.get("animations_enabled", true))
@@ -805,6 +812,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "app.toggle.paste_summary",
         title: pasteSummaryEnabled() ? "Disable paste summary" : "Enable paste summary",
+        slashName: "pastesummary",
         category: "System",
         run: () => {
           setPasteSummaryEnabled((prev) => {
@@ -819,6 +827,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "permission.mode",
         title:
           local.permission.mode === "auto" ? "Disable auto-approve permissions" : "Enable auto-approve permissions",
+        slashName: "autoapprove",
+        slashAliases: ["yolo"],
         category: "System",
         run: () => {
           local.permission.toggle()

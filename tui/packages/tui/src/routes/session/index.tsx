@@ -667,6 +667,9 @@ export function Session() {
       title: sidebarVisible() ? "Hide sidebar" : "Show sidebar",
       value: "session.sidebar.toggle",
       category: "Session",
+      slash: {
+        name: "sidebar",
+      },
       run: () => {
         batch(() => {
           const isVisible = sidebarVisible()
@@ -680,6 +683,9 @@ export function Session() {
       title: conceal() ? "Disable code concealment" : "Enable code concealment",
       value: "session.toggle.conceal",
       category: "Session",
+      slash: {
+        name: "conceal",
+      },
       run: () => {
         setConceal((prev) => !prev)
         dialog.clear()
@@ -719,6 +725,9 @@ export function Session() {
       title: showDetails() ? "Hide tool details" : "Show tool details",
       value: "session.toggle.actions",
       category: "Session",
+      slash: {
+        name: "tooldetails",
+      },
       run: () => {
         setShowDetails((prev) => !prev)
         dialog.clear()
@@ -728,6 +737,9 @@ export function Session() {
       title: "Toggle session scrollbar",
       value: "session.toggle.scrollbar",
       category: "Session",
+      slash: {
+        name: "scrollbar",
+      },
       run: () => {
         setShowScrollbar((prev) => !prev)
         dialog.clear()
@@ -737,6 +749,9 @@ export function Session() {
       title: showGenericToolOutput() ? "Hide generic tool output" : "Show generic tool output",
       value: "session.toggle.generic_tool_output",
       category: "Session",
+      slash: {
+        name: "tooloutput",
+      },
       run: () => {
         setShowGenericToolOutput((prev) => !prev)
         dialog.clear()
@@ -871,6 +886,9 @@ export function Session() {
       title: "Copy last assistant message",
       value: "messages.copy",
       category: "Session",
+      slash: {
+        name: "copylast",
+      },
       run: () => {
         const revertID = session()?.revert?.messageID
         const lastAssistantMessage = messages().findLast(
