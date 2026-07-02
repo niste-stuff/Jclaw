@@ -7,6 +7,9 @@ wired a Rust launcher (`claw tui`), and rebranded the user-facing surface to jcl
 
 The user-facing rebrand, the jclaw-specific features, and a full debug audit (see §3) are
 **done and merged to `main`** (fast-forward from `jclaw-rebrand-sweep` at `42d4ee0`).
+Items 1–16 are on `main`. **Item 17 (card/lorebook model rebuild + lorebook authoring) is
+uncommitted** as of this write-up — typechecked but not yet run through `bun test` or the
+boot probe.
 
 ---
 
@@ -162,6 +165,59 @@ Verified via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, th
     dialog for actual Go users, and the `packages/ui` web-UI i18n `dialog.usageExceeded.freeTier.*`
     keys (separate web surface, typed i18n contract across 6+ locales — not the TUI).
 
+17. **UNCOMMITTED** — **Rebuilt the card/lorebook understanding baked into `peak`/`build`/
+    `lore planning`, empirically, and added lorebook authoring.** Not a code-audit session —
+    the user fed real JanitorAI cards and a real lorebook from
+    `card-corpus/` (untracked, gitignored-by-absence, personal reference set — see
+    `card-corpus-reference` in project memory) and corrected my read of them turn by turn
+    until the model converged; only then did any prompt file change. Full reasoning trail is
+    in project memory (`janitorai-card-model`, `corpus-driven-prompt-iteration`,
+    `card-corpus-reference`) — this entry is the summary.
+    - `agent/prompt/peak.txt` — substantially rewritten. Key corrections to the old rubric:
+      a card is exactly four platform-fixed boxes (Scenario/Personality/Opening Messages
+      [1–10 slots, only one loads per chat]/Example Dialogue) with **no canonical internal
+      template** — formatting inside a box is entirely creator convention. The **visibility
+      line**: only Opening Messages are read by a human as prose; Scenario/Personality/Example
+      Dialogue are backend instructions for the model, so adjective/tag lists and decorative
+      description are fine *there* (previously banned outright) as long as the specifics
+      underneath aren't generic filler. Macro guidance: `{{user}}`/`{user}` either brace style
+      is valid; the `{{sub}}/{{obj}}/{{poss}}/{{ref}}` pronoun-case macro set is the correct
+      tool for gender-agnostic references; a card that drifts from the macro into spelling out
+      "the user" as literal prose is a functional bug and a strong unedited-output tell. Token
+      economics reframed as density-not-length (~2k–3k sweet spot, 4k–6k fine if lorepacked,
+      7k–10k+ bloated) — Scenario/Personality cost every turn, Opening Messages don't (only one
+      of up to 10 slots loads). Rewrote the "anatomy of a bad card" around content failures
+      (genericness under tags, ensemble-of-one-archetype, scenes that just re-enact the stat
+      sheet, verbatim self-repetition across sections) rather than a flat cliché list.
+    - `agent/prompt/build.txt` — quality-bar section condensed to match, so it doesn't
+      contradict `peak` before routing deep work there.
+    - `session/prompt/plan.txt` ("lore planning") — added a lorebook-recommend-and-outline
+      section respecting its existing read-only/no-edit constraint; it flags when a concept
+      needs a lorebook and outlines candidate entries, but defers authoring to `peak`/`build`.
+    - **New: lorebook authoring, in all three agents.** JanitorAI imports the SillyTavern/Chub
+      "World Info" JSON schema. All three agents now recognize when a card's permanent fields
+      are bloating with offloadable reference lore and **propose** moving it into a lorebook —
+      **never author one without explicit user confirmation first**. Authoring rules baked in:
+      one lean `constant:true` hub entry (well under ~1000 tokens, seeds the trigger vocabulary
+      for everything else) plus `constant:false` conditional entries (~300 tokens soft / 400
+      hard) keyed by a case-insensitive word-boundary regex of the topic's name + aliases;
+      entries cascade (a hub's content contains the keywords that trigger the next tier down);
+      split large worlds across multiple files for organization, not selective attachment. A
+      verbatim 27-field entry JSON template is embedded in both `peak.txt` and `build.txt` —
+      validated to parse cleanly.
+    - `component/prompt/index.tsx` — added `/lorebook` (alias `/worldinfo`) to the "Cards"
+      slash-command set alongside `/card`/`/rewrite`/`/contradictions`, following the existing
+      `fillPrompt` pattern exactly. Switches to `peak`, prefills a prompt enforcing the
+      propose-then-confirm lorebook workflow. No extra keybind-config coupling needed (Cards
+      commands aren't key-bound); confirmed the `.map` at line ~625 auto-applies
+      `namespace: "palette"` so one array entry reaches both the `/` popup and `ctrl+p`.
+    - **Verified:** `bun run --cwd packages/tui typecheck` passes; grepped for content-snapshot
+      tests referencing these prompt files/strings (none found, so the rewrite was safe);
+      independently parsed the embedded lorebook JSON template with Python to confirm it's
+      valid, schema-complete JSON. **NOT verified this session:** the full `bun test` suite and
+      the headless `serve` + `/agent` boot probe (§6) — item 10's "all 8 package suites pass"
+      predates this work and should be re-run before calling this done.
+
 Earlier (pre-session, already on `main`): logo wordmark, `scriptName("claw")`, terminal window
 title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
 
@@ -267,7 +323,11 @@ title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
 
 ## 8. Possible next steps
 
+- **Before anything else touches `tui/`**: run `bun test` (all vendored packages) and the
+  headless boot probe for item 17's changes — they've only been typechecked so far, per §3.
 - Optional polish (ask user): pin a stronger model to `peak`; refine the jclaw logo glyphs.
 - Config isolation (only if the user changes their mind): flip `app` in
   `packages/core/src/global.ts` to `"jclaw"` for its own XDG dirs — loses inherited Zen setup.
 - The user's disk is nearly full (see §7) — worth flagging if test failures reappear.
+- Card/lorebook work has more room to grow if the user brings more corpus examples — see
+  project memory `card-corpus-reference` for what's already been reviewed.

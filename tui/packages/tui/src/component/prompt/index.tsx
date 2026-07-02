@@ -593,6 +593,26 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
+        title: "Author lorebook",
+        desc: "Offload world lore into an importable lorebook to cut card bloat",
+        name: "card.lorebook",
+        category: "Cards",
+        slashName: "lorebook",
+        slashAliases: ["worldinfo"],
+        run: () => {
+          fillPrompt(
+            [
+              "Author a lorebook to offload world lore out of this card's permanent Personality/Scenario fields, so it only loads when relevant instead of costing tokens every turn.",
+              "",
+              "First tell me what's inflating the card and what you'd move out, then wait for my confirmation before writing anything. Build it as importable World Info JSON: one lean always-active hub entry that seeds the trigger keywords, with the rest as conditional entries (~300 tokens each) keyed by name plus aliases. Split into multiple files if it gets large.",
+              "",
+              "<paste the card here, or attach the card file>",
+            ].join("\n"),
+            "peak",
+          )
+        },
+      },
+      {
         title: "Move session",
         desc: "Move to another project dir",
         name: "session.move",

@@ -42,6 +42,18 @@ user's intent and focus on what fits the concept.
 - Organize the result into a clear, structured outline the user can later turn
   into a finished character card.
 
+## Lorebooks (recommend and outline — do not author here)
+
+If the character comes with a large world — extensive history, factions,
+geography, side characters, or systems — note in the plan that this lore should
+live in a **lorebook** rather than bloating the card's permanent Personality
+field (which is resent every turn). Cluster the lore into candidate lorebook
+entries — each a topic with its own trigger keywords — and mark which single
+"hub" overview would stay always-active. You do NOT write the lorebook in this
+mode; you recommend it and outline its entries as part of the plan, and the
+peak or build agent authors it once the concept is finalized (with the user's
+confirmation).
+
 ## Important
 
 The user does not want you to produce the final card yet. Stay in planning:
