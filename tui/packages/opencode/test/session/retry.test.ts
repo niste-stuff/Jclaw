@@ -254,7 +254,7 @@ describe("session.retry.retryable", () => {
     expect(retryable).toEqual({ message: "Response decompression failed" })
   })
 
-  test("maps free limits to Go upsell action", () => {
+  test("maps free limits to a generic rate-limit message", () => {
     const error = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
       new SessionV1.APIError({
         message: "Free usage exceeded",
@@ -268,15 +268,7 @@ describe("session.retry.retryable", () => {
     )
 
     expect(SessionRetry.retryable(error, "opencode")).toEqual({
-      message: SessionRetry.GO_UPSELL_MESSAGE,
-      action: {
-        reason: "free_tier_limit",
-        provider: "opencode",
-        title: "Free limit reached",
-        message: "Subscribe to OpenCode Go for reliable access to the best open-source models, starting at $5/month.",
-        label: "subscribe",
-        link: SessionRetry.GO_UPSELL_URL,
-      },
+      message: "Free usage limit reached",
     })
   })
 

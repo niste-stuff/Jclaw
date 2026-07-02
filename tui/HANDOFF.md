@@ -130,6 +130,37 @@ Verified via per-package `tsgo --noEmit` typecheck, the non-TTY render probe, th
 13. `544ee14` **Light-mode theme contrast fix** — textMuted/primary/accent were below 4.5:1 on
    the light background; now ~5:1. Dark mode was already fine.
 
+14. *(uncommitted)* **Added a `catppuccin-latte` theme** — the official Catppuccin *light* flavor
+    (`packages/tui/src/theme/assets/catppuccin-latte.json`, registered in `theme/index.ts`).
+    Authored light-only (same value for both `dark`/`light` keys, like the other catppuccin
+    flavors) with light diff-highlight backgrounds so it renders correctly on a light base.
+    Motivated by a "light mode doesn't work" report that was actually the active theme
+    (`catppuccin-macchiato`) being **dark-only** — its light and dark palettes are identical, so
+    the `/mode` toggle had nothing different to show. See §5.
+
+15. *(uncommitted)* **Promoted OpenRouter, demoted OpenCode Zen/Go to the general provider list.**
+    OpenRouter is already in the models.dev catalog (`id: openrouter`, `OPENROUTER_API_KEY`,
+    `https://openrouter.ai/api/v1`) — natively BYOK, no code needed to "add" it; it was just not
+    surfaced. Changes: `component/dialog-provider.tsx` `PROVIDER_PRIORITY` now leads with
+    `openrouter` (then openai/copilot/anthropic/google) and **drops `opencode`/`opencode-go`** so
+    they fall into the alphabetical "Providers" list instead of the top "Popular" slot; removed
+    their `"(Recommended)"` / subscription blurb descriptions and added `openrouter: "(API key)"`.
+    `component/dialog-model.tsx` lost the `provider.id !== "opencode"` sort key that force-pinned
+    Zen models to the top. **Free models are untouched** — Zen/Go still work, still show the
+    "Free" footer, just aren't front-and-center. **NOTE:** an earlier cosmetic relabel of the
+    Zen/Go *display names* → "OpenRouter" (in `provider/provider.ts`) was **reverted** in favor of
+    the real provider — do not re-add it.
+
+16. *(uncommitted)* **Dropped the "Subscribe to OpenCode Go" free-tier upsell.** On a
+    `FreeUsageLimitError`, `session/retry.ts` now returns a plain `{ message: "Free usage limit
+    reached" }` instead of the Go upsell action/link; removed the now-unused `GO_UPSELL_MESSAGE`
+    /`GO_UPSELL_URL` constants. Since no `free_tier_limit` action is emitted anymore, the TUI
+    upsell dialog never fires for free tier — removed the dead `free_tier_limit` branch +
+    `GO_UPSELL_FREE_TIER_*` KV keys from `routes/session/index.tsx`. Updated `retry.test.ts` +
+    `schema-decoding.test.ts`. **Left intact:** the `account_rate_limit` (Go-subscriber PAYG)
+    dialog for actual Go users, and the `packages/ui` web-UI i18n `dialog.usageExceeded.freeTier.*`
+    keys (separate web surface, typed i18n contract across 6+ locales — not the TUI).
+
 Earlier (pre-session, already on `main`): logo wordmark, `scriptName("claw")`, terminal window
 title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
 
@@ -152,6 +183,14 @@ title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
 
 ## 5. Notes / gotchas specific to this work
 
+- **"Light mode doesn't work" is usually a dark-only *theme*, not the toggle.** The `/mode`
+  command (aliases `/light`, `/dark`) and the Ctrl+P "Switch to light mode" action flip
+  `store.mode` and *pin* it via KV `theme_mode_lock` (see `context/theme.tsx`). But a theme whose
+  `dark` and `light` values are identical (all the catppuccin flavors, dracula, nord, etc.) shows
+  no visible change. Themes with real light palettes: `jclaw`, `catppuccin-latte` (added §3.14),
+  `tokyonight`, `github`, `solarized`, etc. Verify with `resolveTheme(theme, "light").background`
+  vs `"dark"`. Also: `theme_mode_lock` forces a mode and makes jclaw *ignore* the terminal's
+  appearance — clear it (or `/lockmode`) to auto-follow the terminal.
 - **Theme won't visibly change on this machine.** `~/.local/state/opencode/kv.json` has
   `theme: "tokyonight"`, which overrides the new `jclaw` default (default only applies when no
   theme is chosen). To see jclaw: `/themes` → **jclaw** (or clear that KV key).
