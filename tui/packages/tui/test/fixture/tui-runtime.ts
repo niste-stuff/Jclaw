@@ -8,5 +8,5 @@ type ResolvedInput = Omit<Info, "attention" | "keybinds" | "leader_timeout"> & {
 }
 
 export function createTuiResolvedConfig(input: ResolvedInput = {}) {
-  return resolve(input, { terminalSuspend: process.platform !== "win32" })
+  return resolve(input)
 }

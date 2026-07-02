@@ -80,21 +80,8 @@ export type Resolved = Omit<Info, "attention" | "keybinds" | "leader_timeout" | 
   mouse: boolean
 }
 
-export const ResolveOptions = Schema.Struct({
-  terminalSuspend: Schema.Boolean,
-})
-export type ResolveOptions = Schema.Schema.Type<typeof ResolveOptions>
-
-export function resolve(input: Info, options: ResolveOptions): Resolved {
+export function resolve(input: Info): Resolved {
   const keybinds: TuiKeybind.KeybindOverrides = { ...input.keybinds }
-  if (!options.terminalSuspend) {
-    if (keybinds.input_undo === undefined) {
-      const inputUndo = TuiKeybind.defaultValue("input_undo")
-      keybinds.input_undo = ["ctrl+z", ...(typeof inputUndo === "string" ? inputUndo.split(",") : [])]
-        .filter((value, index, values) => values.indexOf(value) === index)
-        .join(",")
-    }
-  }
 
   return {
     ...input,

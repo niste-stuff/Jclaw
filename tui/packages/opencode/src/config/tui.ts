@@ -209,14 +209,9 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
     }
   }
 
-  const result = TuiConfig.resolve(
-    {
-      ...acc.result,
-    },
-    {
-      terminalSuspend: process.platform !== "win32",
-    },
-  )
+  const result = TuiConfig.resolve({
+    ...acc.result,
+  })
 
   return {
     config: result,

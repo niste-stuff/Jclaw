@@ -42,7 +42,7 @@ test("validates config constraints", () => {
 })
 
 test("resolves host-neutral defaults", () => {
-  const config = resolve({}, { terminalSuspend: true })
+  const config = resolve({})
 
   expect(config.attention).toEqual({
     enabled: false,
@@ -54,7 +54,7 @@ test("resolves host-neutral defaults", () => {
   })
   expect(config.leader_timeout).toBe(LeaderTimeoutDefault)
   expect(config.mouse).toBe(true)
-  expect(config.keybinds.has("terminal.suspend")).toBe(true)
+  expect(config.keybinds.has("terminal.suspend")).toBe(false)
   expect(config.keybinds.has("session.list")).toBe(true)
 })
 
@@ -73,7 +73,7 @@ test("resolves overrides without mutating input", () => {
     },
     keybinds: { session_list: "ctrl+l" },
   }
-  const config = resolve(input, { terminalSuspend: true })
+  const config = resolve(input)
 
   expect(config).toMatchObject({ theme: "custom", mouse: false, leader_timeout: 750, attention: input.attention })
   expect(config.keybinds.get("session.list")).toHaveLength(1)
@@ -81,28 +81,26 @@ test("resolves overrides without mutating input", () => {
 })
 
 test("resolves a session move keybind", () => {
-  const config = resolve({ keybinds: { session_move: "ctrl+o" } }, { terminalSuspend: true })
+  const config = resolve({ keybinds: { session_move: "ctrl+o" } })
 
   expect(config.keybinds.get("session.move")).toMatchObject([{ key: "ctrl+o" }])
 })
 
-test("disables suspend and assigns ctrl+z to undo when unsupported", () => {
-  const config = resolve({}, { terminalSuspend: false })
+test("binds ctrl+z to undo by default", () => {
+  const config = resolve({})
 
-  expect(config.keybinds.has("terminal.suspend")).toBe(false)
   expect(config.keybinds.get("input.undo")).toMatchObject([{ key: "ctrl+z,ctrl+-,super+z" }])
 })
 
-test("preserves an explicit undo binding when suspend is unsupported", () => {
-  const config = resolve({ keybinds: { input_undo: "ctrl+u", terminal_suspend: "ctrl+s" } }, { terminalSuspend: false })
+test("preserves an explicit undo binding", () => {
+  const config = resolve({ keybinds: { input_undo: "ctrl+u" } })
 
-  expect(config.keybinds.has("terminal.suspend")).toBe(false)
   expect(config.keybinds.get("input.undo")).toHaveLength(1)
   expect(config.keybinds.get("input.undo")).toMatchObject([{ key: "ctrl+u" }])
 })
 
 test("provides resolved config through Solid context", async () => {
-  const config = resolve({ theme: "custom" }, { terminalSuspend: true })
+  const config = resolve({ theme: "custom" })
 
   function Consumer() {
     const value = useTuiConfig()

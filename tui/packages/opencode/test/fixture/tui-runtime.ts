@@ -19,12 +19,12 @@ type ResolvedInput = Omit<Info, "attention" | "keybinds" | "leader_timeout"> & {
 }
 
 export function createTuiResolvedKeybinds(input: Partial<TuiKeybind.Keybinds> = {}): Resolved["keybinds"] {
-  return resolve({ keybinds: input }, { terminalSuspend: process.platform !== "win32" }).keybinds
+  return resolve({ keybinds: input }).keybinds
 }
 
 export function createTuiResolvedConfig(input: ResolvedInput = {}): HostResolved {
   return {
-    ...resolve(input, { terminalSuspend: process.platform !== "win32" }),
+    ...resolve(input),
     plugin_origins: input.plugin_origins,
   }
 }
