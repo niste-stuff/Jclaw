@@ -15,6 +15,7 @@ import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import PROMPT_PEAK from "./prompt/peak.txt"
+import PROMPT_BUILD from "./prompt/build.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
@@ -141,8 +142,9 @@ const layer = Layer.effect(
         const agents: Record<string, Info> = {
           build: {
             name: "build",
-            description: "The default agent. Executes tools based on configured permissions.",
+            description: "The default agent. Manages your card library and handles everyday tasks.",
             options: {},
+            prompt: PROMPT_BUILD,
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
