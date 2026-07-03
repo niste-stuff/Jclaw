@@ -15,5 +15,3 @@ status-help.txt
 .port_sessions/
 # Dev handoff notes (contain machine-local absolute paths)
 tui/HANDOFF.md
-# Personal JanitorAI card/lorebook reference corpus (not for distribution)
-card-corpus/
