@@ -253,6 +253,26 @@ title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
 **Result:** "opencode" mentions under `packages/tui/src` + `packages/opencode/src/cli` went
 507 → ~458; the remainder is all plumbing (see §2 rule of thumb).
 
+20. `0dbca65` **Fixed a rebrand miss: sidebar footer version stamp.** A user report ("it still
+    says opencode here") traced to `feature-plugins/sidebar/footer.tsx` — the version line under
+    the path/branch rendered `"OpenCode"` as two adjacent `<b>` spans (`Open` + `Code`), which the
+    original sweep's string-literal grep missed. Collapsed to a single `<b>jclaw</b>` span next to
+    `props.api.app.version`.
+21. `tokenize` tool + peak/build nudges **Added a real BPE token counter as a built-in tool**,
+    so `peak`/`build` stop eyeballing the token-economics guidance in §3.17 against actual
+    numbers. `packages/opencode/src/tool/tokenize.ts` (+ `tokenize.txt` description) wraps
+    `gpt-tokenizer` (new dependency, pure-JS, no API key, card text never leaves the machine) —
+    `o200k_base` (default) or `cl100k_base` encoding, returns token count + char count. Registered
+    as a builtin in `tool/registry.ts` (import, `Effect.all`, and the builtin array — three
+    touch points, see the existing tool list there for the pattern). Tools are permission-gated,
+    not allow-listed, so it's automatically available to every agent with no per-agent wiring.
+    Nudged `agent/prompt/peak.txt` and `agent/prompt/build.txt` to call `tokenize` (not estimate)
+    when checking a card's permanent-field budget or a lorebook entry's per-entry budget.
+    **Verified:** both packages typecheck; booted the headless server and confirmed `tokenize`
+    appears in `/experimental/tool/ids` and its JSON-schema-rendered definition is well-formed;
+    ran `httpapi-experimental`, `acp/tool`, `agent`, and `skill` test files (79 pass) — **not**
+    the full `bun test` suite across all packages.
+
 ---
 
 ## 4. Deliberately LEFT (don't "re-fix" these — it breaks things)

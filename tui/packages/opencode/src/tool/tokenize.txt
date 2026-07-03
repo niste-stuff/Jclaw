@@ -1,0 +1,11 @@
+Count the exact number of tokens in a piece of text using a real BPE tokenizer, so you never have to guess a token budget.
+
+Use this whenever token count matters:
+- Checking whether a card's permanent fields (Scenario, Personality, Example Dialogue) fit the density budget you are working to. These cost tokens on every single turn, so measure them, don't eyeball them.
+- Sizing an Opening Message (only one loads per chat, so its cost is one-time).
+- Keeping a lorebook hub entry well under ~1000 tokens and conditional entries near the ~300 soft / 400 hard target.
+- Reporting a real before/after when you trim or de-slop a card.
+
+Pass the text of a single section at a time so you get a per-box breakdown; call the tool again for each section rather than concatenating. The count is a reference number (JanitorAI proxies many models with different tokenizers), not an exact per-model figure — but it is far more reliable than estimating.
+
+Encodings: `o200k_base` (GPT-4o and newer — the default, best modern reference) or `cl100k_base` (GPT-3.5 / GPT-4-era). Omit `encoding` to use the default.
