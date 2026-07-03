@@ -15,3 +15,7 @@ status-help.txt
 .port_sessions/
 # Dev handoff notes (contain machine-local absolute paths)
 tui/HANDOFF.md
+# Machine-local tool config (shared defaults belonged in CLAUDE.md instead)
+/.claude.json
+/.claw.json
+/CLAUDE.md
