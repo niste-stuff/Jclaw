@@ -87,7 +87,7 @@ fn slash_command_names_match_known_commands_and_suggest_nearby_unknown_ones() {
     // then
     assert_success(&help_output);
     let help_stdout = String::from_utf8(help_output.stdout).expect("stdout should be utf8");
-    assert!(help_stdout.contains("Interactive slash commands:"));
+    assert!(help_stdout.contains("Slash commands (via --resume):"));
     assert!(help_stdout.contains("/status"));
 
     assert!(

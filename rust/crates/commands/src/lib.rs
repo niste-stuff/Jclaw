@@ -721,13 +721,6 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         resume_supported: true,
     },
     SlashCommandSpec {
-        name: "setup",
-        aliases: &["api"],
-        summary: "Configure API provider, key, model, and base URL",
-        argument_hint: None,
-        resume_supported: false,
-    },
-    SlashCommandSpec {
         name: "notifications",
         aliases: &[],
         summary: "Show or configure notification settings",
@@ -1109,11 +1102,6 @@ pub enum SlashCommand {
         args: Option<String>,
     },
     Doctor,
-    Setup {
-        /// True when invoked via the `/api` alias rather than `/setup`. Controls
-        /// the wizard heading (`config` vs `Setup Wizard`).
-        from_api: bool,
-    },
     Login,
     Logout,
     Vim,
@@ -1235,7 +1223,6 @@ impl SlashCommand {
             Self::Compact { .. } => "/compact",
             Self::Cost => "/cost",
             Self::Doctor => "/doctor",
-            Self::Setup { .. } => "/setup",
             Self::Config { .. } => "/config",
             Self::Memory { .. } => "/memory",
             Self::History { .. } => "/history",
@@ -1404,12 +1391,6 @@ pub fn validate_slash_command_input(
         "doctor" | "providers" => {
             validate_no_args(command, &args)?;
             SlashCommand::Doctor
-        }
-        "setup" | "api" => {
-            validate_no_args(command, &args)?;
-            SlashCommand::Setup {
-                from_api: command == "api",
-            }
         }
         "login" | "logout" => {
             return Err(command_error(
@@ -1950,7 +1931,7 @@ fn slash_command_category(name: &str) -> &'static str {
         | "stickers" | "language" | "profile" | "max-tokens" | "temperature" | "system-prompt"
         | "api-key" | "terminal-setup" | "notifications" | "telemetry" | "providers" | "env"
         | "project" | "reasoning" | "budget" | "rate-limit" | "workspace" | "reset" | "ide"
-        | "desktop" | "upgrade" | "setup" => "Config",
+        | "desktop" | "upgrade" => "Config",
         "debug-tool-call" | "doctor" | "sandbox" | "diagnostics" | "tool-details" | "changelog"
         | "metrics" => "Debug",
         _ => "Tools",
@@ -5417,7 +5398,6 @@ pub fn handle_slash_command(
         | SlashCommand::AddDir { .. }
         | SlashCommand::History { .. }
         | SlashCommand::Team { .. }
-        | SlashCommand::Setup { .. }
         | SlashCommand::Unknown(_) => None,
     }
 }
@@ -6036,8 +6016,12 @@ mod tests {
         assert!(help.contains("aliases: /skill"));
         assert!(!help.contains("/login"));
         assert!(!help.contains("/logout"));
-        assert!(help.contains("/setup"));
-        assert_eq!(slash_command_specs().len(), 140);
+        // "/setup" itself is gone, but "/terminal-setup" (an unrelated, still-
+        // supported command) legitimately contains the substring "/setup", so
+        // check for the standalone command form instead of a bare substring.
+        assert!(!help.contains("  /setup "));
+        assert!(!help.contains("  /setup\n"));
+        assert_eq!(slash_command_specs().len(), 139);
         assert!(resume_supported_slash_commands().len() >= 39);
     }
 

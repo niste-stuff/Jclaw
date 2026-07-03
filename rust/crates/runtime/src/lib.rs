@@ -144,10 +144,9 @@ pub use policy_engine::{
     PolicyEvaluation, PolicyRule, ReconcileReason, ReviewStatus,
 };
 pub use prompt::{
-    load_janitor_system_prompt, load_janitor_system_prompt_with_context, load_system_prompt,
-    load_system_prompt_with_context, prepend_bullets, ContextFile, ModelFamilyIdentity,
-    ProjectContext, PromptBuildError, SystemPromptBuilder, FRONTIER_MODEL_NAME, JANITOR_STYLE_NAME,
-    JANITOR_STYLE_PROMPT, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    load_system_prompt, load_system_prompt_with_context, prepend_bullets, ContextFile,
+    ModelFamilyIdentity, ProjectContext, PromptBuildError, SystemPromptBuilder,
+    FRONTIER_MODEL_NAME, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
 };
 pub use recovery_recipes::{
     attempt_recovery, recipe_for, EscalationPolicy, FailureScenario, RecoveryAttemptState,

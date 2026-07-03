@@ -9,15 +9,8 @@ publish.workspace = true
 name = "claw"
 path = "src/main.rs"
 
-# Character-card authoring variant. Same binary/TUI as `claw`; the persona and
-# default tool surface switch on the executable name at runtime (see
-# `janitor_mode()` in src/main.rs).
-[[bin]]
-name = "claw-janitor"
-path = "src/main.rs"
-
-# Primary jclaw command: the card-author variant under the project's own name.
-# `jclaw tui` launches the vendored full-screen TUI (see src/tui.rs).
+# Primary jclaw binary. `jclaw` with no subcommand launches the vendored
+# full-screen TUI (see src/tui.rs).
 [[bin]]
 name = "jclaw"
 path = "src/main.rs"

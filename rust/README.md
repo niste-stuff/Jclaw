@@ -2,8 +2,6 @@
 
 A high-performance Rust rewrite of the Claw Code CLI agent harness. Built for speed, safety, and native tool execution.
 
-For a task-oriented guide with copy/paste examples, see [`../USAGE.md`](../USAGE.md).
-
 ## Quick Start
 
 ```bash
@@ -13,9 +11,6 @@ cargo run -p rusty-claude-cli -- --help
 
 # Build the workspace
 cargo build --workspace
-
-# Run the interactive REPL
-cargo run -p rusty-claude-cli -- --model claude-opus-4-7
 
 # One-shot prompt
 cargo run -p rusty-claude-cli -- prompt "explain this codebase"
@@ -41,9 +36,8 @@ export ANTHROPIC_AUTH_TOKEN="anthropic-oauth-or-proxy-bearer-token"
 ```
 
 For local OpenAI-compatible servers such as Ollama, including Qwen reasoning
-models, see [`../docs/local-openai-compatible-providers.md`](../docs/local-openai-compatible-providers.md).
-Use the exact model tag exposed by the server, for example `qwen3:latest`, and
-prefer `OLLAMA_HOST` for Ollama-specific local routing.
+models, use the exact model tag exposed by the server, for example
+`qwen3:latest`, and prefer `OLLAMA_HOST` for Ollama-specific local routing.
 
 ## Mock parity harness
 
@@ -86,7 +80,6 @@ Primary artifacts:
 |---------|--------|
 | Anthropic / OpenAI-compatible provider flows + streaming | ✅ |
 | Direct bearer-token auth via `ANTHROPIC_AUTH_TOKEN` | ✅ |
-| Interactive REPL (rustyline) | ✅ |
 | Tool system (bash, read, write, edit, grep, glob) | ✅ |
 | Web tools (search, fetch) | ✅ |
 | Sub-agent / agent surfaces | ✅ |
@@ -166,28 +159,6 @@ The command surface is moving quickly. For the canonical live help text, run:
 cargo run -p rusty-claude-cli -- --help
 ```
 
-## Slash Commands (REPL)
-
-Tab completion expands slash commands, model aliases, permission modes, and recent session IDs.
-
-The REPL now exposes a much broader surface than the original minimal shell:
-
-- session / visibility: `/help`, `/status`, `/sandbox`, `/cost`, `/resume`, `/session`, `/version`, `/usage`, `/stats`
-- workspace / git: `/compact`, `/clear`, `/config`, `/memory`, `/init`, `/diff`, `/commit`, `/pr`, `/issue`, `/export`, `/hooks`, `/files`, `/release-notes`
-- discovery / debugging: `/mcp`, `/agents`, `/skills`, `/doctor`, `/tasks`, `/context`, `/desktop`
-- automation / analysis: `/review`, `/advisor`, `/insights`, `/security-review`, `/subagent`, `/team`, `/telemetry`, `/providers`, `/cron`, and more
-- plugin management: `/plugin` (with aliases `/plugins`, `/marketplace`)
-
-Notable claw-first surfaces now available directly in slash form:
-- `/skills [list|show <name>|install <path>|uninstall <name>|help]`
-- `/agents [list|show <name>|create <name>|help]`
-- `/mcp [list|show <server>|help]`
-- `/doctor`
-- `/plugin [list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]`
-- `/subagent [list|steer <target> <msg>|kill <id>]`
-
-See [`../USAGE.md`](../USAGE.md) for usage examples and run `cargo run -p rusty-claude-cli -- --help` for the live canonical command list.
-
 ## Workspace Layout
 
 ```text
@@ -214,7 +185,7 @@ rust/
 - **mock-anthropic-service** — deterministic `/v1/messages` mock for CLI parity tests and local harness runs
 - **plugins** — plugin metadata, install/enable/disable/update flows, plugin tool definitions, hook integration surfaces
 - **runtime** — `ConversationRuntime`, config loading, session persistence, permission policy, MCP client lifecycle, system prompt assembly, usage tracking
-- **rusty-claude-cli** — REPL, one-shot prompt, direct CLI subcommands, streaming display, tool call rendering, CLI argument parsing
+- **rusty-claude-cli** — one-shot prompt, direct CLI subcommands, streaming display, tool call rendering, CLI argument parsing
 - **telemetry** — session trace events and supporting telemetry payloads
 - **tools** — tool specs + execution: Bash, ReadFile, WriteFile, EditFile, GlobSearch, GrepSearch, WebSearch, WebFetch, Agent, TodoWrite, NotebookEdit, Skill, ToolSearch, and runtime-facing tool discovery
 

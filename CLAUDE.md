@@ -8,12 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Verification
 - Run Rust verification from repo root: `scripts/fmt.sh --check`; for formatting use `scripts/fmt.sh`. Run Rust clippy/tests from `rust/`: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`
-- `src/` and `tests/` are both present; update both surfaces together when behavior changes.
 
 ## Repository shape
 - `rust/` contains the Rust workspace and active CLI/runtime implementation.
-- `src/` contains source files that should stay consistent with generated guidance and tests.
-- `tests/` contains validation surfaces that should be reviewed alongside code changes.
+- `tui/` contains the vendored Bun/Solid/OpenTUI front end, rebranded to jclaw.
+- `tests/` contains `test_pre_push_hook_contract.py`, which validates `.github/hooks/pre-push`. Run it with `python3 -m unittest discover -s tests`.
 
 ## Working agreement
 - Prefer small, reviewable changes and keep generated bootstrap files aligned with actual repo workflows.

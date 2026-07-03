@@ -17,7 +17,6 @@
 mod init;
 mod input;
 mod render;
-mod setup_wizard;
 mod tui;
 
 use std::collections::BTreeSet;
@@ -58,9 +57,8 @@ use render::{
     TerminalRenderer,
 };
 use runtime::{
-    check_base_commit, format_stale_base_warning, format_usd, load_janitor_system_prompt,
-    load_janitor_system_prompt_with_context, load_oauth_credentials, load_system_prompt,
-    load_system_prompt_with_context, pricing_for_model, resolve_expected_base,
+    check_base_commit, format_stale_base_warning, format_usd, load_oauth_credentials,
+    load_system_prompt, load_system_prompt_with_context, pricing_for_model, resolve_expected_base,
     resolve_sandbox_status, ApiClient, ApiRequest, AssistantEvent, BaseCommitState,
     CompactionConfig, ConfigFileReport, ConfigLoader, ConfigSource, ContentBlock, ContextFile,
     ConversationMessage, ConversationRuntime, McpConfigCollection, McpInvalidServerConfig,
@@ -302,7 +300,6 @@ const CLI_OPTION_SUGGESTIONS: &[&str] = &[
     "-h",
     "--version",
     "-V",
-    "--config",
     "--model",
     "--output-format",
     "--permission-mode",
@@ -340,16 +337,8 @@ type RuntimePluginStateBuildOutput = (
 );
 
 fn main() {
-    // claw-janitor may read card files anywhere the user points it for style
-    // reference; writes/edits stay workspace-scoped. `claw` leaves reads jailed.
-    if janitor_mode() {
-        tools::allow_unrestricted_reads();
-    }
     if let Err(error) = run() {
-        // Usage hints are written with the canonical `claw` name; when invoked as
-        // claw-janitor, rebrand them so "Run `claw --help`" etc. name the binary
-        // the user actually ran. No-op for `claw` (and in tests, which run `claw`).
-        let message = rebrand_cli_name_for_janitor(error.to_string());
+        let message = error.to_string();
         // When --output-format json is active, emit errors as JSON so downstream
         // tools can parse failures the same way they parse successes (ROADMAP #42).
         let argv: Vec<String> = std::env::args().collect();
@@ -1023,7 +1012,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     // The `jclaw` command with no subcommand launches the TUI in the current
     // directory, so `cd <project> && jclaw` opens the TUI there. Only the
-    // `jclaw` binary does this; bare `claw`/`claw-janitor` keep their behavior.
+    // `jclaw` binary does this; bare `claw` keeps its normal subcommand behavior.
     if args.is_empty() && invoked_cli_name() == "jclaw" {
         return tui::run_tui(&[]);
     }
@@ -1134,8 +1123,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::SessionList { output_format } => run_session_list(output_format)?,
         CliAction::State { output_format } => run_worker_state(output_format)?,
         CliAction::Init { output_format } => run_init(output_format)?,
-        CliAction::Setup { output_format: _ } => run_setup()?,
-        CliAction::ConfigMenu => setup_wizard::run_config_menu()?,
         // #146: dispatch pure-local introspection. Text mode uses existing
         // render_config_report/render_diff_report; JSON mode uses the
         // corresponding _json helpers already exposed for resume sessions.
@@ -1174,21 +1161,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             output_path,
             output_format,
         } => run_export(&session_reference, output_path.as_deref(), output_format)?,
-        CliAction::Repl {
-            model,
-            allowed_tools,
-            permission_preset,
-            base_commit,
-            reasoning_effort,
-            allow_broad_cwd,
-        } => run_repl(
-            model,
-            allowed_tools,
-            permission_preset,
-            base_commit,
-            reasoning_effort,
-            allow_broad_cwd,
-        )?,
         CliAction::HelpTopic {
             topic,
             output_format,
@@ -1279,12 +1251,6 @@ enum CliAction {
     Init {
         output_format: CliOutputFormat,
     },
-    Setup {
-        output_format: CliOutputFormat,
-    },
-    /// `--config`: interactive settings hub (provider/API, model, default
-    /// permission mode). Distinct from the read-only `config` subcommand.
-    ConfigMenu,
     // #146: `claw config` and `claw diff` are pure-local read-only
     // introspection commands; wire them as standalone CLI subcommands.
     Config {
@@ -1302,14 +1268,6 @@ enum CliAction {
         session_reference: String,
         output_path: Option<PathBuf>,
         output_format: CliOutputFormat,
-    },
-    Repl {
-        model: String,
-        allowed_tools: Option<AllowedToolSet>,
-        permission_preset: PermissionPreset,
-        base_commit: Option<String>,
-        reasoning_effort: Option<String>,
-        allow_broad_cwd: bool,
     },
     HelpTopic {
         topic: LocalHelpTopic,
@@ -1348,7 +1306,6 @@ enum LocalHelpTopic {
     Model,
     Settings,
     Diff,
-    Setup,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1534,10 +1491,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     // Tracks the user-facing preset (plan / acceptEdits / bypassPermissions / …)
     // separately from the enforced mode, so the REPL can launch directly into a
     // named mode and apply plan-mode behavior. Only consumed by the Repl action.
-    let mut permission_preset_override: Option<PermissionPreset> = None;
     let mut wants_help = false;
     let mut wants_version = false;
-    let mut wants_config = false;
     let mut allowed_tool_values = Vec::new();
     let mut compact = false;
     let mut base_commit: Option<String> = None;
@@ -1574,10 +1529,6 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             }
             "--version" | "-V" => {
                 wants_version = true;
-                index += 1;
-            }
-            "--config" => {
-                wants_config = true;
                 index += 1;
             }
             "--model" => {
@@ -1631,7 +1582,6 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     push_duplicate_flag("--permission-mode (overwriting previous value)");
                 }
                 let preset = parse_permission_preset_arg(value)?;
-                permission_preset_override = Some(preset);
                 permission_mode_override = Some(preset.enforced());
                 index += 2;
             }
@@ -1643,13 +1593,11 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             }
             flag if flag.starts_with("--permission-mode=") => {
                 let preset = parse_permission_preset_arg(&flag[18..])?;
-                permission_preset_override = Some(preset);
                 permission_mode_override = Some(preset.enforced());
                 index += 1;
             }
             "--dangerously-skip-permissions" | "--skip-permissions" => {
                 permission_mode_override = Some(PermissionMode::DangerFullAccess);
-                permission_preset_override = Some(PermissionPreset::BypassPermissions);
                 index += 1;
             }
             "--compact" => {
@@ -1827,7 +1775,6 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 "doctor" => Some(LocalHelpTopic::Doctor),
                 "acp" => Some(LocalHelpTopic::Acp),
                 "init" => Some(LocalHelpTopic::Init),
-                "setup" => Some(LocalHelpTopic::Setup),
                 "state" => Some(LocalHelpTopic::State),
                 "resume" => Some(LocalHelpTopic::Resume),
                 "session" => Some(LocalHelpTopic::Session),
@@ -1860,10 +1807,6 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
 
     if wants_version {
         return Ok(CliAction::Version { output_format });
-    }
-
-    if wants_config {
-        return Ok(CliAction::ConfigMenu);
     }
 
     let allowed_tools = normalize_allowed_tools(&allowed_tool_values)?;
@@ -1900,8 +1843,6 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
 
     if rest.is_empty() {
         let permission_mode = permission_mode_override.unwrap_or_else(default_permission_mode);
-        let permission_preset = permission_preset_override
-            .unwrap_or_else(|| PermissionPreset::from_mode(permission_mode));
         let stdin_is_terminal = std::io::stdin().is_terminal();
         if compact && stdin_is_terminal {
             return Err(compact_missing_argument_error());
@@ -1938,14 +1879,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             // #746: newline before remediation so split_error_hint populates hint field
             return Err("interactive_only: claw requires an interactive terminal.\nStdin is not a TTY and no prompt was provided — pipe a prompt with `echo 'task' | claw` or run `claw` in an interactive terminal.".into());
         }
-        return Ok(CliAction::Repl {
-            model,
-            allowed_tools,
-            permission_preset,
-            base_commit,
-            reasoning_effort: reasoning_effort.clone(),
-            allow_broad_cwd,
-        });
+        return Ok(CliAction::Help { output_format });
     }
     if let Some(action) = parse_local_help_action(&rest, output_format) {
         return action;
@@ -2211,15 +2145,6 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             }
             Ok(CliAction::Init { output_format })
         }
-        "setup" => {
-            if rest.len() > 1 {
-                let extra = rest[1..].join(" ");
-                return Err(format!(
-                    "unexpected extra arguments after `claw setup`: {extra}\nUsage: claw setup"
-                ));
-            }
-            Ok(CliAction::Setup { output_format })
-        }
         "export" => parse_export_args(&rest[1..], output_format),
         "prompt" => {
             let mut read_stdin = false;
@@ -2347,7 +2272,6 @@ fn parse_local_help_action(
         "doctor" => LocalHelpTopic::Doctor,
         "acp" => LocalHelpTopic::Acp,
         "init" => LocalHelpTopic::Init,
-        "setup" => LocalHelpTopic::Setup,
         "state" => LocalHelpTopic::State,
         "export" => LocalHelpTopic::Export,
         "version" => LocalHelpTopic::Version,
@@ -2393,7 +2317,7 @@ fn parse_single_word_command_alias(
     let verb = &rest[0];
     let is_diagnostic = matches!(
         verb.as_str(),
-        "help" | "version" | "status" | "sandbox" | "doctor" | "setup" | "state"
+        "help" | "version" | "status" | "sandbox" | "doctor" | "state"
     );
 
     if is_diagnostic && rest.len() > 1 {
@@ -2413,7 +2337,6 @@ fn parse_single_word_command_alias(
                 "doctor" => Some(LocalHelpTopic::Doctor),
                 "acp" => Some(LocalHelpTopic::Acp),
                 "init" => Some(LocalHelpTopic::Init),
-                "setup" => Some(LocalHelpTopic::Setup),
                 "state" => Some(LocalHelpTopic::State),
                 "export" => Some(LocalHelpTopic::Export),
                 "version" => Some(LocalHelpTopic::Version),
@@ -2468,7 +2391,6 @@ fn parse_single_word_command_alias(
             "doctor" => Some(LocalHelpTopic::Doctor),
             "acp" => Some(LocalHelpTopic::Acp),
             "init" => Some(LocalHelpTopic::Init),
-            "setup" => Some(LocalHelpTopic::Setup),
             "state" => Some(LocalHelpTopic::State),
             "export" => Some(LocalHelpTopic::Export),
             "version" => Some(LocalHelpTopic::Version),
@@ -2531,7 +2453,6 @@ fn parse_single_word_command_alias(
                 .map(PermissionModeProvenance::from_flag)
                 .unwrap_or_else(permission_mode_provenance_for_current_dir),
         })),
-        "setup" => Some(Ok(CliAction::Setup { output_format })),
         "state" => Some(Ok(CliAction::State { output_format })),
         // #146: let `config` and `diff` fall through to parse_subcommand
         // where they are wired as pure-local introspection, instead of
@@ -2824,7 +2745,6 @@ fn suggest_similar_subcommand(input: &str) -> Option<Vec<String>> {
         "status",
         "sandbox",
         "doctor",
-        "setup",
         "state",
         "dump-manifests",
         "bootstrap-plan",
@@ -4117,10 +4037,6 @@ fn run_doctor(
 }
 
 /// Run the interactive setup wizard to configure provider, API key, and model.
-fn run_setup() -> Result<(), Box<dyn std::error::Error>> {
-    setup_wizard::run_setup_wizard(false)
-}
-
 /// Starts a minimal Model Context Protocol server that exposes claw's
 /// built-in tools over stdio.
 ///
@@ -5302,11 +5218,8 @@ fn print_system_prompt(
     output_format: CliOutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let family = model_family_identity_for(model);
-    let (sections, project_context) = if janitor_mode() {
-        load_janitor_system_prompt_with_context(cwd, date, env::consts::OS, "unknown", family)?
-    } else {
-        load_system_prompt_with_context(cwd, date, env::consts::OS, "unknown", family)?
-    };
+    let (sections, project_context) =
+        load_system_prompt_with_context(cwd, date, env::consts::OS, "unknown", family)?;
     let (project_root, _) =
         parse_git_status_metadata_for(&project_context.cwd, project_context.git_status.as_deref());
     let memory_files = memory_file_summaries_for(
@@ -7286,8 +7199,7 @@ fn run_resume_command(
         | SlashCommand::Tag { .. }
         | SlashCommand::OutputStyle { .. }
         | SlashCommand::AddDir { .. }
-        | SlashCommand::Team { .. }
-        | SlashCommand::Setup { .. } => Err("unsupported resumed slash command".into()),
+        | SlashCommand::Team { .. } => Err("unsupported resumed slash command".into()),
     }
 }
 
@@ -7402,105 +7314,6 @@ fn run_stale_base_preflight(flag_value: Option<&str>) {
     if let Some(warning) = format_stale_base_warning(&state) {
         eprintln!("{warning}");
     }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_repl(
-    model: String,
-    allowed_tools: Option<AllowedToolSet>,
-    permission_preset: PermissionPreset,
-    base_commit: Option<String>,
-    reasoning_effort: Option<String>,
-    allow_broad_cwd: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    enforce_broad_cwd_policy(allow_broad_cwd, CliOutputFormat::Text)?;
-    // Detect a usable provider (Anthropic or any OpenAI-compatible endpoint)
-    // before resolving the model; if none is configured, prompt for one. This
-    // also runs before model resolution so a freshly chosen model takes effect.
-    setup_wizard::ensure_provider_configured();
-    run_stale_base_preflight(base_commit.as_deref());
-    let resolved_model = resolve_repl_model(model)?;
-    let mut cli = LiveCli::new(resolved_model, true, allowed_tools, permission_preset)?;
-    cli.set_reasoning_effort(reasoning_effort);
-    let mut editor =
-        input::LineEditor::new("> ", cli.repl_completion_candidates().unwrap_or_default());
-    println!("{}", cli.startup_banner());
-    println!("{}", format_connected_line(&cli.model));
-
-    loop {
-        editor.set_completions(cli.repl_completion_candidates().unwrap_or_default());
-        // Hermes-style input box: a separator, the status line, a separator, then
-        // the prompt. Redrawn each turn so context/usage/uptime stay current.
-        let rule = "─".repeat(banner_width());
-        println!("\x1b[2m{rule}\x1b[0m");
-        println!("{}", cli.status_bar_line());
-        // Claude-Code-style mode footer: shows the active preset and the
-        // Shift+Tab hint so users can cycle modes from the prompt.
-        println!("{}", cli.permission_mode_indicator());
-        println!("\x1b[2m{rule}\x1b[0m");
-        match editor.read_line()? {
-            input::ReadOutcome::CyclePermissionMode => {
-                cli.cycle_permission_mode()?;
-                cli.persist_session()?;
-                // Repaint in place: erase the input box we just drew (4 box
-                // lines + the accepted prompt line) so Shift+Tab updates the
-                // mode footer live instead of pushing a new box each press.
-                if io::stdout().is_terminal() {
-                    print!("\x1b[5F\x1b[J");
-                    let _ = io::stdout().flush();
-                }
-            }
-            input::ReadOutcome::Submit(input) => {
-                let trimmed = input.trim().to_string();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                if matches!(trimmed.as_str(), "/exit" | "/quit") {
-                    cli.persist_session()?;
-                    break;
-                }
-                match SlashCommand::parse(&trimmed) {
-                    Ok(Some(command)) => {
-                        if cli.handle_repl_command(command)? {
-                            cli.persist_session()?;
-                        }
-                        continue;
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        eprintln!("{error}");
-                        continue;
-                    }
-                }
-                // Bare-word skill dispatch: if the first token of the input
-                // matches a known skill name, invoke it as `/skills <input>`
-                // rather than forwarding raw text to the LLM (ROADMAP #36).
-                let cwd = std::env::current_dir().unwrap_or_default();
-                if let Some(prompt) = try_resolve_bare_skill_prompt(&cwd, &trimmed) {
-                    editor.push_history(input);
-                    cli.record_prompt_history(&trimmed);
-                    let started = Instant::now();
-                    let outcome = cli.run_turn(&prompt);
-                    cli.note_turn_duration(started.elapsed());
-                    outcome?;
-                    continue;
-                }
-                editor.push_history(input);
-                cli.record_prompt_history(&trimmed);
-                let started = Instant::now();
-                let outcome = cli.run_turn(&trimmed);
-                cli.note_turn_duration(started.elapsed());
-                outcome?;
-            }
-            input::ReadOutcome::Cancel => {}
-            input::ReadOutcome::Exit => {
-                cli.persist_session()?;
-                break;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -8040,17 +7853,13 @@ impl LiveCli {
         permission_preset: PermissionPreset,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let permission_mode = permission_preset.enforced();
-        // claw-janitor runs the SAME full tool surface as `claw` — bash/shell,
-        // file read/write/edit, glob/grep search, web, git, plus the two card
-        // tools (validate_card, token_budget_check) — so it can author cards
-        // alongside the user the way a real coding agent works: searching with
-        // grep/bash, reading references, and editing files in place. The persona
-        // (see JANITOR_STYLE_PROMPT), not a tool whitelist, keeps it on task.
-        // Safety is unchanged: writes/edits stay jailed to the workspace by the
-        // runtime's file-op boundary, bash is still gated by the WorkspaceWrite
-        // permission prompt, and reads may range outside the workspace for
-        // references (see allow_unrestricted_reads in main()). A `--allowed-tools`
-        // flag still pins an explicit set for either binary.
+        // The default tool surface offers the full coding-agent toolset —
+        // bash/shell, file read/write/edit, glob/grep search, web, git, plus
+        // the two card tools (validate_card, token_budget_check). Safety is
+        // enforced by the runtime: writes/edits stay jailed to the workspace
+        // by the runtime's file-op boundary, and bash is still gated by the
+        // WorkspaceWrite permission prompt. A `--allowed-tools` flag pins an
+        // explicit set when needed.
         let system_prompt = build_system_prompt(&model)?;
         let session_state = new_cli_session()?;
         let session = create_managed_session_handle(&session_state.session_id)?;
@@ -8569,200 +8378,6 @@ impl LiveCli {
             })
         );
         Ok(())
-    }
-
-    #[allow(clippy::too_many_lines)]
-    fn handle_repl_command(
-        &mut self,
-        command: SlashCommand,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
-        Ok(match command {
-            SlashCommand::Help => {
-                println!("{}", render_repl_help());
-                false
-            }
-            SlashCommand::Status => {
-                self.print_status();
-                false
-            }
-            SlashCommand::Bughunter { scope } => {
-                self.run_bughunter(scope.as_deref())?;
-                false
-            }
-            SlashCommand::Commit => {
-                self.run_commit(None)?;
-                false
-            }
-            SlashCommand::Pr { context } => {
-                self.run_pr(context.as_deref())?;
-                false
-            }
-            SlashCommand::Issue { context } => {
-                self.run_issue(context.as_deref())?;
-                false
-            }
-            SlashCommand::Ultraplan { task } => {
-                self.run_ultraplan(task.as_deref())?;
-                false
-            }
-            SlashCommand::Teleport { target } => {
-                Self::run_teleport(target.as_deref())?;
-                false
-            }
-            SlashCommand::DebugToolCall => {
-                self.run_debug_tool_call(None)?;
-                false
-            }
-            SlashCommand::Sandbox => {
-                Self::print_sandbox_status();
-                false
-            }
-            SlashCommand::Compact => {
-                self.compact()?;
-                false
-            }
-            SlashCommand::Model { model } => self.set_model(model)?,
-            SlashCommand::Effort { level } => {
-                self.handle_effort_command(level);
-                false
-            }
-            SlashCommand::Permissions { mode } => self.set_permissions(mode)?,
-            SlashCommand::Clear { confirm } => self.clear_session(confirm)?,
-            SlashCommand::Cost => {
-                self.print_cost();
-                false
-            }
-            SlashCommand::Resume { session_path } => self.resume_session(session_path)?,
-            SlashCommand::Config { section } => {
-                Self::print_config(section.as_deref())?;
-                false
-            }
-            SlashCommand::Mcp { action, target } => {
-                let args = match (action.as_deref(), target.as_deref()) {
-                    (None, None) => None,
-                    (Some(action), None) => Some(action.to_string()),
-                    (Some(action), Some(target)) => Some(format!("{action} {target}")),
-                    (None, Some(target)) => Some(target.to_string()),
-                };
-                Self::print_mcp(args.as_deref(), CliOutputFormat::Text)?;
-                false
-            }
-            SlashCommand::Memory => {
-                Self::print_memory()?;
-                false
-            }
-            SlashCommand::Init => {
-                run_init(CliOutputFormat::Text)?;
-                false
-            }
-            SlashCommand::Diff => {
-                Self::print_diff()?;
-                false
-            }
-            SlashCommand::Version => {
-                Self::print_version(CliOutputFormat::Text);
-                false
-            }
-            SlashCommand::Export { path } => {
-                self.export_session(path.as_deref())?;
-                false
-            }
-            SlashCommand::Session { action, target } => {
-                self.handle_session_command(action.as_deref(), target.as_deref())?
-            }
-            SlashCommand::Agents { args } => {
-                if let Err(error) = Self::print_agents(args.as_deref(), CliOutputFormat::Text) {
-                    eprintln!("{error}");
-                }
-                false
-            }
-            SlashCommand::Skills { args } => {
-                match classify_skills_slash_command(args.as_deref()) {
-                    SkillSlashDispatch::Invoke(prompt) => self.run_turn(&prompt)?,
-                    SkillSlashDispatch::Local => {
-                        if let Err(error) =
-                            Self::print_skills(args.as_deref(), CliOutputFormat::Text)
-                        {
-                            eprintln!("{error}");
-                        }
-                    }
-                }
-                false
-            }
-            SlashCommand::Doctor => {
-                println!(
-                    "{}",
-                    render_doctor_report(
-                        ConfigWarningMode::EmitStderr,
-                        permission_mode_provenance_for_current_dir(),
-                    )?
-                    .render()
-                );
-                false
-            }
-            SlashCommand::Setup { from_api } => {
-                if let Err(e) = setup_wizard::run_setup_wizard(from_api) {
-                    eprintln!("Setup failed: {e}");
-                }
-                false
-            }
-            SlashCommand::History { count } => {
-                self.print_prompt_history(count.as_deref());
-                false
-            }
-            SlashCommand::Stats => {
-                let usage = UsageTracker::from_session(self.runtime.session()).cumulative_usage();
-                println!("{}", format_cost_report(usage));
-                false
-            }
-            SlashCommand::Plugins { .. }
-            | SlashCommand::Login
-            | SlashCommand::Logout
-            | SlashCommand::Vim
-            | SlashCommand::Upgrade
-            | SlashCommand::Share
-            | SlashCommand::Feedback
-            | SlashCommand::Files
-            | SlashCommand::Fast
-            | SlashCommand::Exit
-            | SlashCommand::Summary
-            | SlashCommand::Desktop
-            | SlashCommand::Brief
-            | SlashCommand::Advisor
-            | SlashCommand::Stickers
-            | SlashCommand::Insights
-            | SlashCommand::Thinkback
-            | SlashCommand::ReleaseNotes
-            | SlashCommand::SecurityReview
-            | SlashCommand::Keybindings
-            | SlashCommand::PrivacySettings
-            | SlashCommand::Plan { .. }
-            | SlashCommand::Review { .. }
-            | SlashCommand::Tasks { .. }
-            | SlashCommand::Theme { .. }
-            | SlashCommand::Voice { .. }
-            | SlashCommand::Usage { .. }
-            | SlashCommand::Rename { .. }
-            | SlashCommand::Copy { .. }
-            | SlashCommand::Hooks { .. }
-            | SlashCommand::Context { .. }
-            | SlashCommand::Color { .. }
-            | SlashCommand::Branch { .. }
-            | SlashCommand::Rewind { .. }
-            | SlashCommand::Ide { .. }
-            | SlashCommand::Tag { .. }
-            | SlashCommand::OutputStyle { .. }
-            | SlashCommand::AddDir { .. }
-            | SlashCommand::Team { .. } => {
-                let cmd_name = command.slash_name();
-                eprintln!("{cmd_name} is not yet implemented in this build.");
-                false
-            }
-            SlashCommand::Unknown(name) => {
-                eprintln!("{}", format_unknown_slash_command(&name));
-                false
-            }
-        })
     }
 
     fn persist_session(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -10642,7 +10257,7 @@ fn render_help_topic(topic: LocalHelpTopic) -> String {
     match topic {
         LocalHelpTopic::Status => "Status
   Usage            claw status [--output-format <format>]
-  Purpose          show the local workspace snapshot without entering the REPL
+  Purpose          show the local workspace snapshot
   Output           model, permissions, git state, config files, and sandbox status
   Formats          text (default), json
   Related          /status · claw --resume latest /status"
@@ -10771,7 +10386,7 @@ fn render_help_topic(topic: LocalHelpTopic) -> String {
         LocalHelpTopic::Model => "Models
   Usage            claw models [help] [--output-format <format>]
   Aliases          claw model
-  Purpose          show bounded local model command guidance without entering the REPL
+  Purpose          show bounded local model command guidance
   Output           supported model-selection surfaces and current config model value
   Formats          text (default), json
   Related          /model · claw config model · claw status"
@@ -10788,13 +10403,6 @@ fn render_help_topic(topic: LocalHelpTopic) -> String {
   Purpose          show the diff of changes relative to the expected base commit
   Formats          text (default), json
   Related          /diff · ROADMAP #148"
-            .to_string(),
-        LocalHelpTopic::Setup => "Setup
-  Usage            claw setup
-  Aliases          /setup (inside the REPL)
-  Purpose          run the interactive provider setup wizard to configure API key, model, and base URL
-  Output           writes provider settings to ~/.claw/settings.json (0600 permissions)
-  Related          /model · /config · claw doctor"
             .to_string(),
     }
 }
@@ -10823,7 +10431,6 @@ fn local_help_topic_command(topic: LocalHelpTopic) -> &'static str {
         LocalHelpTopic::Model => "models",
         LocalHelpTopic::Settings => "settings",
         LocalHelpTopic::Diff => "diff",
-        LocalHelpTopic::Setup => "setup",
     }
 }
 
@@ -12399,33 +12006,8 @@ fn short_tool_id(id: &str) -> String {
     format!("{prefix}…")
 }
 
-/// True when this binary was launched as `claw-janitor` (the character-card
-/// authoring variant). Both binaries share this `main.rs`; the persona and the
-/// default tool surface switch on the executable name.
-fn janitor_mode() -> bool {
-    let is_janitor = |name: &str| {
-        matches!(
-            std::path::Path::new(name)
-                .file_stem()
-                .and_then(|s| s.to_str()),
-            Some("claw-janitor" | "jclaw")
-        )
-    };
-    if let Ok(exe) = env::current_exe() {
-        if exe
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .is_some_and(|s| matches!(s, "claw-janitor" | "jclaw"))
-        {
-            return true;
-        }
-    }
-    env::args().next().is_some_and(|arg0| is_janitor(&arg0))
-}
-
-/// The name this binary was invoked as, for usage hints: `claw-janitor` for the
-/// card-author variant, otherwise `claw`. Both share this binary, so usage
-/// strings should name whichever the user actually ran.
+/// The name this binary was invoked as, for usage hints: `jclaw` when run
+/// under that name, otherwise `claw`.
 fn invoked_cli_name() -> &'static str {
     let stem = env::current_exe()
         .ok()
@@ -12441,35 +12023,14 @@ fn invoked_cli_name() -> &'static str {
         .unwrap_or_default();
     match stem.as_str() {
         "jclaw" => "jclaw",
-        "claw-janitor" => "claw-janitor",
         _ => "claw",
     }
-}
-
-/// Rewrite `claw`-prefixed usage tokens in an error/help message to name the
-/// invoked binary. No-op unless running as claw-janitor, so `claw` output (and
-/// every test, which runs the `claw` binary) is untouched. Only whole-word
-/// `claw` command forms are rewritten — never `claw-janitor` itself (it has no
-/// trailing space after `claw`) or words like `claws`.
-fn rebrand_cli_name_for_janitor(message: String) -> String {
-    if !janitor_mode() {
-        return message;
-    }
-    message
-        .replace("`claw ", "`claw-janitor ")
-        .replace("`claw`", "`claw-janitor`")
-        .replace("Usage: claw ", "Usage: claw-janitor ")
-        .replace("or claw -p", "or claw-janitor -p")
 }
 
 fn build_system_prompt(model: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
     let family = model_family_identity_for(model);
-    let sections = if janitor_mode() {
-        load_janitor_system_prompt(cwd, DEFAULT_DATE, env::consts::OS, "unknown", family)?
-    } else {
-        load_system_prompt(cwd, DEFAULT_DATE, env::consts::OS, "unknown", family)?
-    };
+    let sections = load_system_prompt(cwd, DEFAULT_DATE, env::consts::OS, "unknown", family)?;
     Ok(sections)
 }
 
@@ -14713,11 +14274,6 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "Usage:")?;
     writeln!(
         out,
-        "  claw [--model MODEL] [--allowedTools TOOL[,TOOL...]]"
-    )?;
-    writeln!(out, "      Start the interactive REPL")?;
-    writeln!(
-        out,
         "  claw [--model MODEL] [--output-format text|json] prompt [--stdin] [TEXT]"
     )?;
     writeln!(
@@ -14739,7 +14295,7 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     )?;
     writeln!(
         out,
-        "      Inspect or maintain a saved session without entering the REPL"
+        "      Inspect or maintain a saved session non-interactively"
     )?;
     writeln!(out, "  claw help")?;
     writeln!(out, "      Alias for --help")?;
@@ -14825,12 +14381,8 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         out,
         "  --version, -V              Print version and build information locally"
     )?;
-    writeln!(
-        out,
-        "  --config                   Open the interactive settings menu (provider/API key, model, default permission mode)"
-    )?;
     writeln!(out)?;
-    writeln!(out, "Interactive slash commands:")?;
+    writeln!(out, "Slash commands (via --resume):")?;
     writeln!(out, "{}", render_slash_command_help_filtered(STUB_COMMANDS))?;
     writeln!(out)?;
     let resume_commands = resume_supported_slash_commands()
@@ -14847,7 +14399,7 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "Session shortcuts:")?;
     writeln!(
         out,
-        "  REPL turns auto-save to .claw/sessions/<session-id>.{PRIMARY_SESSION_EXTENSION}"
+        "  Prompt turns auto-save to .claw/sessions/<session-id>.{PRIMARY_SESSION_EXTENSION}"
     )?;
     writeln!(
         out,
@@ -14855,7 +14407,7 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     )?;
     writeln!(
         out,
-        "  Use /session list in the REPL to browse managed sessions"
+        "  Use --resume /session list to browse managed sessions"
     )?;
     writeln!(out, "Examples:")?;
     writeln!(out, "  claw --model claude-opus \"summarize this repo\"")?;
@@ -15289,18 +14841,13 @@ mod tests {
         .expect("write plugin manifest");
     }
     #[test]
-    fn defaults_to_repl_when_no_args() {
+    fn defaults_to_help_when_no_args() {
         let _guard = env_lock();
         std::env::remove_var("RUSTY_CLAUDE_PERMISSION_MODE");
         assert_eq!(
             parse_args(&[]).expect("args should parse"),
-            CliAction::Repl {
-                model: DEFAULT_MODEL.to_string(),
-                allowed_tools: None,
-                permission_preset: PermissionPreset::WorkspaceWrite,
-                base_commit: None,
-                reasoning_effort: None,
-                allow_broad_cwd: false,
+            CliAction::Help {
+                output_format: CliOutputFormat::Text,
             }
         );
     }
@@ -15757,13 +15304,8 @@ mod tests {
         let args = vec!["--permission-mode=read-only".to_string()];
         assert_eq!(
             parse_args(&args).expect("args should parse"),
-            CliAction::Repl {
-                model: DEFAULT_MODEL.to_string(),
-                allowed_tools: None,
-                permission_preset: PermissionPreset::ReadOnly,
-                base_commit: None,
-                reasoning_effort: None,
-                allow_broad_cwd: false,
+            CliAction::Help {
+                output_format: CliOutputFormat::Text,
             }
         );
     }
@@ -15778,13 +15320,8 @@ mod tests {
 
         assert_eq!(
             parsed,
-            CliAction::Repl {
-                model: DEFAULT_MODEL.to_string(),
-                allowed_tools: None,
-                permission_preset: PermissionPreset::BypassPermissions,
-                base_commit: None,
-                reasoning_effort: None,
-                allow_broad_cwd: false,
+            CliAction::Help {
+                output_format: CliOutputFormat::Text,
             }
         );
     }
@@ -15830,18 +15367,8 @@ mod tests {
         ];
         assert_eq!(
             parse_args(&args).expect("args should parse"),
-            CliAction::Repl {
-                model: DEFAULT_MODEL.to_string(),
-                allowed_tools: Some(
-                    ["glob_search", "read_file", "write_file"]
-                        .into_iter()
-                        .map(str::to_string)
-                        .collect()
-                ),
-                permission_preset: PermissionPreset::WorkspaceWrite,
-                base_commit: None,
-                reasoning_effort: None,
-                allow_broad_cwd: false,
+            CliAction::Help {
+                output_format: CliOutputFormat::Text,
             }
         );
     }
@@ -17974,10 +17501,8 @@ mod tests {
         assert!(!help.contains("aliases: /plugins, /marketplace"));
         assert!(help.contains("/agents"));
         assert!(help.contains("/skills"));
-        // Fork commands surface in help: /effort (reasoning tiers) and the
-        // /api alias for the setup wizard.
+        // Fork commands surface in help: /effort (reasoning tiers).
         assert!(help.contains("/effort [none|low|medium|high|xhigh|max]"));
-        assert!(help.contains("aliases: /api"));
         assert!(help.contains("/exit"));
         assert!(help.contains(
             "Auto-save            .claw/sessions/<workspace-fingerprint>/<session-id>.jsonl"

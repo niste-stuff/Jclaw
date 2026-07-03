@@ -39,15 +39,15 @@ use serde_json::{json, Value};
 pub mod card_tools;
 
 /// Process-global read-scope switch. When enabled, the read/list/grep tools are
-/// no longer jailed to the current workspace, so the agent may pull style
-/// references from card files anywhere the user points it. Writes/edits remain
-/// jailed to the workspace regardless. `claw-janitor` enables this at startup;
-/// `claw` leaves it off, preserving its workspace-only read posture.
+/// no longer jailed to the current workspace, so callers that opt in may pull
+/// reference material from files anywhere the user points them. Writes/edits
+/// remain jailed to the workspace regardless. Left off by default, preserving
+/// the workspace-only read posture.
 static READS_UNRESTRICTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-/// Allow the read/list/grep tools to range outside the workspace. Call once at
-/// binary startup (see `claw-janitor`). Writes stay workspace-scoped.
+/// Allow the read/list/grep tools to range outside the workspace. Writes stay
+/// workspace-scoped.
 pub fn allow_unrestricted_reads() {
     READS_UNRESTRICTED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
@@ -10123,9 +10123,9 @@ mod tests {
 
     #[test]
     fn default_surface_offers_full_toolset_plus_card_tools() {
-        // claw-janitor runs the unrestricted (`None`) tool surface, so it must
-        // expose BOTH the full coding-agent tools (bash, edit_file, grep) and
-        // the card-authoring tools — they coexist in the default spec list.
+        // The unrestricted (`None`) tool surface must expose BOTH the full
+        // coding-agent tools (bash, edit_file, grep) and the card-authoring
+        // tools — they coexist in the default spec list.
         let names: Vec<&str> = mvp_tool_specs().iter().map(|spec| spec.name).collect();
         for tool in [
             "bash",
@@ -10155,8 +10155,8 @@ mod tests {
         let original_dir = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(&root).expect("set cwd");
 
-        // claw-janitor enables this at startup; restore before releasing the
-        // lock so the default-jailed tests are unaffected by ordering.
+        // Callers that opt in enable this explicitly; restore before releasing
+        // the lock so the default-jailed tests are unaffected by ordering.
         super::allow_unrestricted_reads();
 
         let read_ok = execute_tool(
