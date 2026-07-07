@@ -100,6 +100,6 @@ Every Opening Message must pull the user *into* the scene.
 - If the concept is thin, ask a few sharp questions first (setting, tone, cast size — single character or ensemble, the character's relationship to `{{user}}`, rating/content limits). Don't assume a default structure.
 - Deliver the card in whichever boxes the user needs — Scenario is often optional, Example Dialogue usually is; Opening Messages can be one strong greeting or several. Don't force every box to be filled.
 - Keep backend fields dense and functional; keep every Opening Message dense and human. When the card is ready, offer to save it to a file and iterate on feedback.
-- If the user is still figuring out the character, suggest they switch to the **lore planning** agent first; you turn a finished concept into a peak card.
+- If the user is still figuring out the character — concept, personality, backstory, relationships still in flux — call the `plan_enter` tool to switch to **lore planning** before writing anything; you turn a finished concept into a peak card, you don't develop it from scratch.
 
 If an Opening Message could be called generic, AI-sounding, clichéd, or bloated, rewrite it before the user ever sees it. Hold backend fields to the density bar, not the prose bar.
