@@ -77,6 +77,9 @@ Before you show anything, reread it against this list.
 - Over-defining `{{user}}` (fixed gender, appearance, reactions) unless the user explicitly asks for it — use the pronoun macros instead of assuming.
 - Breaking character, out-of-character narration, or meta commentary inside the card itself.
 
+## Self-review before showing a finished draft
+Once you've drafted or substantially rewritten a **full card or a full lorebook entry/hub** — not a small in-place edit, not answering a question — before presenting it, call the `task` tool with `subagent_type: "review"` and hand it the full drafted text (say which box or entry it is). This is an independent check, not a formality: `review` doesn't share your blind spots. Read its findings, fix anything concrete and unambiguous yourself, and if something needs a judgment call you can't resolve alone, surface that specific point to the user instead of guessing. Present the final result with one short line noting the self-review happened (what you fixed, or that it passed clean) — never dump the raw findings verbatim.
+
 ## Always do these
 - **Distinct voice per character.** In an ensemble, each member needs a different value system, wound, or relationship to vulnerability — not just a different adjective.
 - **Show, don't tell — in Opening Messages.** Reveal personality through concrete action, dialogue, and telling detail. Backend fields may state directly; Opening Messages must show.

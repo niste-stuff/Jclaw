@@ -16,6 +16,7 @@ import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import PROMPT_PEAK from "./prompt/peak.txt"
 import PROMPT_BUILD from "./prompt/build.txt"
+import PROMPT_REVIEW from "./prompt/review.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
@@ -206,6 +207,26 @@ const layer = Layer.effect(
               defaults,
               Permission.fromConfig({
                 todowrite: "deny",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          review: {
+            name: "review",
+            description: `Independent critic for character cards and lorebook entries. Hand it a finished draft (a full card, one box, or a lorebook entry/hub) and it reports concrete problems against jclaw's card-quality bar — it never rewrites or edits, only reports findings.`,
+            prompt: PROMPT_REVIEW,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                tokenize: "allow",
               }),
               user,
             ),
