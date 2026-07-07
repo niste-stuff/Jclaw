@@ -22,12 +22,12 @@ cd rust && cargo run --bin claw -- tui
 
 ## The agents
 
-- **peak** — the card author. Turns a finished concept into a top-tier card, or
-  rewrites an existing one to cut AI tells and bloat.
-- **lore planning** — collaborative brainstorming when you're still figuring out
-  who the character is. It plans; it doesn't write files.
-- **build** — the default general-purpose assistant: manages your card library,
+- **build** — The default general-purpose assistant: manages your card library,
   handles everyday tasks, routes deep card work to the right specialist.
+- **lore planning** — Collaborative brainstorming when you're still figuring out
+  who the character is. It plans; it doesn't write files.
+- **peak** — The "peak". card author. Turns a finished concept into a top-tier card, or
+  rewrites an existing one to cut AI tells and bloat.
 
 Slash commands (`/card`, `/rewrite`, `/contradictions`, `/lorebook`) prefill the
 composer for common card jobs.
