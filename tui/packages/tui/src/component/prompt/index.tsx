@@ -595,6 +595,23 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
+        title: "Deep swarm review",
+        desc: "Run a 4-lens audit (prose, lore, macros, structure) on the current card",
+        name: "card.swarm",
+        category: "Cards",
+        slashName: "swarm",
+        slashAliases: ["deepreview"],
+        run: () => {
+          fillPrompt(
+            [
+              "Run a full deep review pass on this draft: call the task tool with subagent_type: \"review-swarm\" and hand it the card text, then show me the merged findings directly — this is an explicit deep-audit request, not the routine self-check, so don't silently swallow it into just a one-line note.",
+              "",
+              "<paste the card here, or attach the card file>",
+            ].join("\n"),
+          )
+        },
+      },
+      {
         title: "Author lorebook",
         desc: "Offload world lore into an importable lorebook to cut card bloat",
         name: "card.lorebook",

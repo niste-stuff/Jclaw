@@ -17,6 +17,11 @@ import PROMPT_TITLE from "./prompt/title.txt"
 import PROMPT_PEAK from "./prompt/peak.txt"
 import PROMPT_BUILD from "./prompt/build.txt"
 import PROMPT_REVIEW from "./prompt/review.txt"
+import PROMPT_REVIEW_PROSE from "./prompt/review-prose.txt"
+import PROMPT_REVIEW_LORE from "./prompt/review-lore.txt"
+import PROMPT_REVIEW_MACROS from "./prompt/review-macros.txt"
+import PROMPT_REVIEW_STRUCTURE from "./prompt/review-structure.txt"
+import PROMPT_REVIEW_SWARM from "./prompt/review-swarm.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
@@ -234,6 +239,113 @@ const layer = Layer.effect(
                 glob: "allow",
                 list: "allow",
                 tokenize: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          "review-prose": {
+            name: "review-prose",
+            description: `Review-swarm lens: prose/craft quality and AI-tells. Findings only, no rewrites.`,
+            prompt: PROMPT_REVIEW_PROSE,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
+          "review-lore": {
+            name: "review-lore",
+            description: `Review-swarm lens: cross-box and cross-file lore/lorebook consistency. Findings only, no rewrites.`,
+            prompt: PROMPT_REVIEW_LORE,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
+          "review-macros": {
+            name: "review-macros",
+            description: `Review-swarm lens: {{user}}/{{char}} macro correctness. Findings only, no rewrites.`,
+            prompt: PROMPT_REVIEW_MACROS,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
+          "review-structure": {
+            name: "review-structure",
+            description: `Review-swarm lens: structural correctness and token economics. Findings only, no rewrites.`,
+            prompt: PROMPT_REVIEW_STRUCTURE,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                tokenize: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
+          "review-swarm": {
+            name: "review-swarm",
+            description: `Deep multi-lens review pass for character cards and lorebook entries. Fans a draft out to four specialist critics (prose, lore, macros, structure) in parallel and merges their findings into one report. Findings only, no rewrites. Use for an explicit deep-audit request; use "review" for the routine quick self-check.`,
+            prompt: PROMPT_REVIEW_SWARM,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                task: {
+                  "*": "deny",
+                  "review-prose": "allow",
+                  "review-lore": "allow",
+                  "review-macros": "allow",
+                  "review-structure": "allow",
+                },
               }),
               user,
             ),
