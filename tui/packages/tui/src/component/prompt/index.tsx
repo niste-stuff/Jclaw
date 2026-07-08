@@ -604,7 +604,7 @@ export function Prompt(props: PromptProps) {
         run: () => {
           fillPrompt(
             [
-              "Run a full deep review pass on this draft: call the task tool with subagent_type: \"review-swarm\" and hand it the card text, then show me the merged findings directly — this is an explicit deep-audit request, not the routine self-check, so don't silently swallow it into just a one-line note.",
+              'Run a full deep review pass on this draft: call the task tool with subagent_type: "review-swarm" and hand it the card text, then show me the merged findings directly — this is an explicit deep-audit request, not the routine self-check, so don\'t silently swallow it into just a one-line note.',
               "",
               "<paste the card here, or attach the card file>",
             ].join("\n"),
@@ -648,12 +648,34 @@ export function Prompt(props: PromptProps) {
                     "Read that file first. Treat it as canon — pull the character, world, relationships, tone, and any hard facts straight from it, and don't invent details that contradict it. If the lore is too thin to build a real character from, switch to lore planning to develop it with me first instead of making things up.",
                     "",
                     "Then author all four boxes — personality (shown through specifics and contradictions, not adjective lists), appearance, the slice of backstory that still shapes them now, a distinct speech style with example lines, and a scenario. Finish with an opening message that drops {{user}} into a live scene without acting or speaking for them.",
+                    "",
+                    "If this lore is a whole world with more than one character in it, ask me which character or angle to build the card around before you start, rather than assuming a single subject.",
                   ].join("\n"),
                   "peak",
                 )
               }
             />
           ))
+        },
+      },
+      {
+        title: "Build a world",
+        desc: "Generate a cohesive world and save it to your lore library",
+        name: "card.world",
+        category: "Cards",
+        slashName: "world",
+        slashAliases: ["worldbuild"],
+        run: () => {
+          fillPrompt(
+            [
+              "Author a cohesive, internally consistent world from the premise below and save it to my lore library so I can build cards from it later.",
+              "",
+              `Draft it as freeform prose in Markdown — interlock the geography, factions, history, characters, and rules so the pieces trace back to each other, and hold the no-slop bar (no generic-fantasy filler, no adjective-list worldbuilding). Show me the draft and refine it with me. Once I'm happy, save it under the worlds/ subfolder of my lore library at ${Global.Path.lore} — a new file named after the world (kebab-case, .md). If a file for this world already exists there, ask before overwriting, and confirm the path when you're done.`,
+              "",
+              "<describe the world premise here — a sentence or a page, whatever you've got>",
+            ].join("\n"),
+            "worldsmith",
+          )
         },
       },
       {

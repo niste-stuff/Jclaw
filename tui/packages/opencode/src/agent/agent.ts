@@ -16,6 +16,7 @@ import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import PROMPT_PEAK from "./prompt/peak.txt"
 import PROMPT_BUILD from "./prompt/build.txt"
+import PROMPT_WORLDSMITH from "./prompt/worldsmith.txt"
 import PROMPT_REVIEW from "./prompt/review.txt"
 import PROMPT_REVIEW_PROSE from "./prompt/review-prose.txt"
 import PROMPT_REVIEW_LORE from "./prompt/review-lore.txt"
@@ -205,6 +206,30 @@ const layer = Layer.effect(
                 plan_enter: "allow",
                 external_directory: {
                   [path.join(Global.Path.lore, "*")]: "allow",
+                },
+              }),
+              user,
+            ),
+            mode: "primary",
+            native: true,
+          },
+          worldsmith: {
+            name: "worldsmith",
+            description:
+              "Author cohesive, internally consistent worlds and save them to your lore library for cards to be built from.",
+            options: {},
+            prompt: PROMPT_WORLDSMITH,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                question: "allow",
+                plan_enter: "allow",
+                external_directory: {
+                  [path.join(Global.Path.lore, "*")]: "allow",
+                },
+                task: {
+                  "*": "deny",
+                  peak: "allow",
                 },
               }),
               user,

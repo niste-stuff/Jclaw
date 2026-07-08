@@ -751,6 +751,7 @@ it.instance(
         build: { disable: true },
         "lore planning": { disable: true },
         peak: { disable: true },
+        worldsmith: { disable: true },
       },
     },
   },

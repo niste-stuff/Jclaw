@@ -52,7 +52,7 @@ export function recentModels(
 // whatever model you have selected rather than keeping their own. Route their
 // model reads/writes to the base "build" agent's slot so switching to them
 // keeps the current model, and changing the model anywhere applies to all.
-const PRESET_AGENTS = new Set(["lore planning", "peak"])
+const PRESET_AGENTS = new Set(["lore planning", "peak", "worldsmith"])
 const SHARED_MODEL_KEY = "build"
 export function modelKey(agentName: string) {
   return PRESET_AGENTS.has(agentName) ? SHARED_MODEL_KEY : agentName
