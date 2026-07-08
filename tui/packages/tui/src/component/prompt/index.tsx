@@ -49,6 +49,8 @@ import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
+import { DialogLore } from "../dialog-lore"
+import { Global } from "@opencode-ai/core/global"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../config"
@@ -609,6 +611,51 @@ export function Prompt(props: PromptProps) {
               "<paste the card here, or attach the card file>",
             ].join("\n"),
             "peak",
+          )
+        },
+      },
+      {
+        title: "Build card from lore",
+        desc: "Pick lore from your library and build a card grounded in it",
+        name: "card.loreBuild",
+        category: "Cards",
+        slashName: "lore",
+        run: () => {
+          dialog.replace(() => (
+            <DialogLore
+              onPick={(pick) =>
+                fillPrompt(
+                  [
+                    `Build a full character card grounded in the lore at ${pick.path}`,
+                    "",
+                    "Read that file first. Treat it as canon — pull the character, world, relationships, tone, and any hard facts straight from it, and don't invent details that contradict it. If the lore is too thin to build a real character from, switch to lore planning to develop it with me first instead of making things up.",
+                    "",
+                    "Then author all four boxes — personality (shown through specifics and contradictions, not adjective lists), appearance, the slice of backstory that still shapes them now, a distinct speech style with example lines, and a scenario. Finish with an opening message that drops {{user}} into a live scene without acting or speaking for them.",
+                  ].join("\n"),
+                  "peak",
+                )
+              }
+            />
+          ))
+        },
+      },
+      {
+        title: "Add lore to library",
+        desc: "Save lore into your library so you can build cards from it later",
+        name: "card.loreAdd",
+        category: "Cards",
+        slashName: "loreadd",
+        slashAliases: ["addlore"],
+        run: () => {
+          fillPrompt(
+            [
+              `Save this lore into my lore library at ${Global.Path.lore} so I can build cards from it later.`,
+              "",
+              `Write it to a new file in that directory named after the topic (kebab-case, .md). If a file for this topic already exists there, ask me before overwriting. Confirm the path you saved it to when you're done.`,
+              "",
+              "<paste the lore here, or attach / name the file to import>",
+            ].join("\n"),
+            "build",
           )
         },
       },

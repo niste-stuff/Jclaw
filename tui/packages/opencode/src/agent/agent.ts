@@ -151,6 +151,9 @@ const layer = Layer.effect(
               Permission.fromConfig({
                 question: "allow",
                 plan_enter: "allow",
+                external_directory: {
+                  [path.join(Global.Path.lore, "*")]: "allow",
+                },
               }),
               user,
             ),
@@ -171,6 +174,7 @@ const layer = Layer.effect(
                 },
                 external_directory: {
                   [path.join(Global.Path.data, "plans", "*")]: "allow",
+                  [path.join(Global.Path.lore, "*")]: "allow",
                 },
                 edit: {
                   "*": "deny",
@@ -194,6 +198,9 @@ const layer = Layer.effect(
               Permission.fromConfig({
                 question: "allow",
                 plan_enter: "allow",
+                external_directory: {
+                  [path.join(Global.Path.lore, "*")]: "allow",
+                },
               }),
               user,
             ),
