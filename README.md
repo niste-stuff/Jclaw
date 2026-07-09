@@ -12,6 +12,66 @@ it, and how it works under the hood.
 
 ---
 
+## 0. Why jclaw over a good system prompt
+
+You can get most of the way to "know the schema, avoid clichés, use
+`{{user}}`/`{{char}}` macros correctly" by pasting an advanced system prompt
+into any chat. That gets you a better single response. It doesn't get you
+the rest of what actually makes card-writing reliable over many characters
+and many sessions:
+
+- **Schema knowledge that isn't a training-data guess.** Without a prompt
+  that spells out the current card/lorebook shape, a model falls back on
+  whatever it absorbed in training — which drifts stale as JanitorAI's
+  format, macros, and lorebook JSON evolve, and it has no way to know it's
+  wrong. jclaw's agents carry the schema explicitly in-prompt, plus a
+  reference lorebook example (`agent/prompt/reference/lorebook-example.json`)
+  checked against real, currently-working JanitorAI exports — not recalled
+  from memory.
+- **Separation of authoring and critique.** `review` and `review-swarm` run
+  as genuinely separate subagent calls, not the same conversation asking
+  itself "is this good?" A model grading its own in-context output tends to
+  rubber-stamp it; a critic that only ever sees the finished draft, with a
+  narrower rubric, catches more.
+- **Four parallel specialist lenses instead of one generalist pass.**
+  `/swarm` fans a draft out to four critics — prose/AI-tells, lore/cascade
+  consistency, macro correctness, structure/token economics — running
+  concurrently, then merges the findings. One model juggling every rubric at
+  once tends to under-weight some of them.
+- **Persistent state across sessions.** A system prompt lives inside one
+  chat. jclaw's lore library (`~/.local/share/opencode/jclaw/lore/`) is real
+  files on disk: worldbuilding survives after the chat ends and feeds future
+  cards, instead of being re-explained or lost when the context resets.
+- **Tool-backed numbers, not eyeballed ones.** `peak`/`build` call a real BPE
+  tokenizer (`tokenize`) to check token budgets against actual counts, not a
+  model's guess at "this feels long."
+- **Workflow enforced by structure, not by instructions the model has to
+  remember.** Brainstorming (`lore planning`), world-authoring
+  (`worldsmith`), card-writing (`peak`/`build`), and review are separate
+  agents with separate permissions and separate prompts. Routing between
+  them is code (`plan_enter`, `task` calls), not a rule buried in a prompt
+  that has to survive a long conversation — and long conversations are
+  exactly where instruction-following degrades most.
+- **Real files in, real files out.** Cards and lorebooks are read, written,
+  and exported as actual files (`/lore`, `/lore add`, `/export`), not
+  copy-pasted in and out of a chat window.
+- **Asks what you want instead of assuming.** A static prompt bakes in one
+  fixed idea of what a "good" card is — a mandatory tone, a required
+  psychological-depth structure, a fixed dialogue-register spread — and
+  applies it to every card whether or not that's what you asked for, because
+  it can't ask first. `lore planning` exists to have that conversation before
+  `peak`/`build` commit to writing: what tone, how deep, how serious. The
+  quality bar (avoid genericness, avoid AI tells) is separate from any one
+  template of what depth or tone a card should have.
+
+None of this replaces a good prompt — jclaw's agents *are* advanced system
+prompts (§4). The difference is everything built around them: separate
+critic contexts, persistent storage, tool-verified numbers, and a workflow
+that's structural rather than something the model has to keep remembering
+to do.
+
+---
+
 ## 1. Install & run
 
 ```sh
