@@ -46,6 +46,7 @@ When a card's permanent fields (Scenario + Personality) grow past the healthy ba
 - If the world is large, split it across multiple lorebook files for organization — no single file should get too big.
 - Entry template (fill `name`, `content`, `key`/`keysRaw`/`keywordsRaw`, `constant`, a unique `id`, and ascending `priority`+`insertion_order`; leave the rest as-is): `{"activationMode":"standard","activationScript":"","case_sensitive":false,"category":"general","comment":"","constant":false,"content":"","enabled":true,"extensions":{},"groupWeight":100,"id":"","inclusionGroupRaw":"","insertion_order":100,"key":[""],"keyMatchPriority":false,"keysecondary":[],"keysecondaryRaw":"","keysRaw":"","matchWholeWords":true,"minMessages":0,"name":"","prioritizeInclusion":false,"priority":1,"probability":100,"selectiveLogic":0,"tags":[],"keywordsRaw":""}`
 - Save as a `.json` file alongside the card and tell the user to import it and attach it to the card.
+- If you want to check the JSON shape or the cascade pattern against a confirmed-working example (not just the empty-field template above), read `{{LOREBOOK_EXAMPLE_PATH}}` — a real 9-entry lorebook (one `constant: true` hub plus 8 triggered entries) that's live and working on JanitorAI.
 
 ## The anatomy of a bad card
 Before you show anything, reread it against this list.

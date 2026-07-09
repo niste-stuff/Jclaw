@@ -27,6 +27,7 @@ import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
+import { fileURLToPath } from "url"
 import { Plugin } from "@/plugin"
 import { Skill } from "../skill"
 import { Effect, Context, Layer, Schema } from "effect"
@@ -40,6 +41,11 @@ import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/l
 import { Reference } from "@opencode-ai/core/reference"
 import { Location } from "@opencode-ai/core/location"
 import { PluginV2 } from "@opencode-ai/core/plugin"
+
+// Confirmed-working reference lorebook (constant hub + cascading entries),
+// read on demand by peak/build rather than embedded in their prompts — keeps
+// the ~5k-token example out of the permanent per-turn cost.
+const LOREBOOK_EXAMPLE_PATH = fileURLToPath(new URL("./prompt/reference/lorebook-example.json", import.meta.url))
 
 export const Info = Schema.Struct({
   name: Schema.String,
@@ -151,7 +157,7 @@ const layer = Layer.effect(
             name: "build",
             description: "The default agent. Manages your card library and handles everyday tasks.",
             options: {},
-            prompt: PROMPT_BUILD,
+            prompt: PROMPT_BUILD.replaceAll("{{LOREBOOK_EXAMPLE_PATH}}", LOREBOOK_EXAMPLE_PATH),
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
@@ -159,6 +165,7 @@ const layer = Layer.effect(
                 plan_enter: "allow",
                 external_directory: {
                   [path.join(Global.Path.lore, "*")]: "allow",
+                  [LOREBOOK_EXAMPLE_PATH]: "allow",
                 },
               }),
               user,
@@ -198,7 +205,7 @@ const layer = Layer.effect(
             description:
               "Write peak character cards — no AI tells, no clichés, with a strong hook that pulls the user into the scene.",
             options: {},
-            prompt: PROMPT_PEAK,
+            prompt: PROMPT_PEAK.replaceAll("{{LOREBOOK_EXAMPLE_PATH}}", LOREBOOK_EXAMPLE_PATH),
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
@@ -206,6 +213,7 @@ const layer = Layer.effect(
                 plan_enter: "allow",
                 external_directory: {
                   [path.join(Global.Path.lore, "*")]: "allow",
+                  [LOREBOOK_EXAMPLE_PATH]: "allow",
                 },
               }),
               user,
