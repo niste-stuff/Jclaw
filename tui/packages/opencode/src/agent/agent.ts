@@ -23,6 +23,8 @@ import PROMPT_REVIEW_LORE from "./prompt/review-lore.txt"
 import PROMPT_REVIEW_MACROS from "./prompt/review-macros.txt"
 import PROMPT_REVIEW_STRUCTURE from "./prompt/review-structure.txt"
 import PROMPT_REVIEW_SWARM from "./prompt/review-swarm.txt"
+import PROMPT_SECTION_DRAFT from "./prompt/section-draft.txt"
+import PROMPT_DRAFT_SWARM from "./prompt/draft-swarm.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
@@ -382,6 +384,46 @@ const layer = Layer.effect(
                   "review-lore": "allow",
                   "review-macros": "allow",
                   "review-structure": "allow",
+                },
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          "section-draft": {
+            name: "section-draft",
+            description: `Draft-swarm worker: writes one distinct-angle variant of a single card section (not a whole card). One variant per call, no self-critique, no rewrites of anything else.`,
+            prompt: PROMPT_SECTION_DRAFT,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
+          "draft-swarm": {
+            name: "draft-swarm",
+            description: `Multiple-takes drafting pass for a single card section (Scenario, Personality, one Opening Message, or Example Dialogue). Fans out to parallel section-draft workers, each given a distinct creative angle, and shows every variant in full so the user can pick or modify one. Use for "give me a few options for X" — not a whole-card rewrite.`,
+            prompt: PROMPT_DRAFT_SWARM,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                task: {
+                  "*": "deny",
+                  "section-draft": "allow",
                 },
               }),
               user,

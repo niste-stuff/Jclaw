@@ -33,11 +33,14 @@ and many sessions:
   itself "is this good?" A model grading its own in-context output tends to
   rubber-stamp it; a critic that only ever sees the finished draft, with a
   narrower rubric, catches more.
-- **Four parallel specialist lenses instead of one generalist pass.**
-  `/swarm` fans a draft out to four critics — prose/AI-tells, lore/cascade
-  consistency, macro correctness, structure/token economics — running
-  concurrently, then merges the findings. One model juggling every rubric at
-  once tends to under-weight some of them.
+- **Specialist lenses fanned out in parallel, chosen per draft.** `/swarm`
+  runs whichever of four critics actually apply to what you handed it —
+  prose/AI-tells and structure/token economics by default, lore/cascade
+  consistency and macro correctness only when there's actually something to
+  cross-reference or a macro to check — concurrently, then merges the
+  findings and states up front which lenses ran or were skipped and why. One
+  model juggling every rubric at once, including ones that don't apply, tends
+  to under-weight the ones that do.
 - **Persistent state across sessions.** A system prompt lives inside one
   chat. jclaw's lore library (`~/.local/share/opencode/jclaw/lore/`) is real
   files on disk: worldbuilding survives after the chat ends and feeds future
@@ -218,11 +221,13 @@ behalf — see [Agent-initiated switching](#11-how-it-works) below).
 | Agent | Hidden from `@`-mentions | Purpose |
 |---|---|---|
 | **review** | no | Strict critic for a single card/lorebook draft. Reports concrete problems only — never rewrites or proposes fixes itself. Auto-spawned by `peak`/`build` before presenting a finished draft. |
-| **review-swarm** | no | Deep audit: fans a draft out to four specialist critics in parallel, then merges their findings into one report. Trigger explicitly with `/swarm` or by asking for heavy scrutiny. |
+| **review-swarm** | no | Deep audit: fans a draft out to whichever of its four specialist critics actually apply (skips ones with nothing to do, e.g. macro-checking a draft with no macros), in parallel, then merges their findings into one report — stating up front which lenses ran or were skipped and why. Trigger explicitly with `/swarm` or by asking for heavy scrutiny. |
 | review-prose | yes | Swarm lens: prose quality, clichés, AI-tells. |
 | review-lore | yes | Swarm lens: cross-box and cross-file lore/lorebook consistency. |
 | review-macros | yes | Swarm lens: `{{user}}`/`{{char}}` macro correctness (catches the "collapsed to literal 'the user' text" bug). |
 | review-structure | yes | Swarm lens: structural correctness and token economics (uses the `tokenize` tool). |
+| **draft-swarm** | no | Generates several distinct creative takes on a single card section (not a whole card) in parallel, then presents them for you to pick or modify before moving on. Trigger with `/takes`. |
+| section-draft | yes | draft-swarm's worker: writes one variant of one section, given a specific creative angle. |
 | **general** | no | General-purpose research/multi-step execution helper. |
 | **explore** | no | Fast, read-only codebase/file explorer (file search, grep, architecture questions). |
 | compaction / title / summary | yes | Internal housekeeping agents (context compaction, session titling/summarizing) — not user-facing. |
@@ -246,7 +251,8 @@ Type `/` in the composer, or open the command palette with `ctrl+p`.
 | `/card` | `/newcard` | Prefills a scaffold-a-new-card prompt and switches to `peak`. |
 | `/rewrite` | `/deslop` | Prefills a de-slop-the-current-card prompt and switches to `peak`. |
 | `/contradictions` | `/contradict` | Scans the current card for internal inconsistencies. Stays on the current agent — a manual, on-demand deep-dive. |
-| `/swarm` | `/deepreview` | Fans the current draft out to the 4-lens `review-swarm` and shows the merged findings in full (not condensed). |
+| `/swarm` | `/deepreview` | Fans the current draft out to whichever of `review-swarm`'s 4 lenses apply and shows the merged findings in full (not condensed). |
+| `/takes` | `/draftswarm` | Fans out 3 distinct-angle takes on a single card section (not the whole card) via `draft-swarm` and shows them for you to pick or modify — stays on the current agent. |
 | `/lorebook` | `/worldinfo` | Prefills a propose-then-confirm lorebook-authoring prompt for the current card, switches to `peak`. |
 | `/lore` | — | Opens a picker over your lore library, then hands the picked file's path to `peak` to build a card grounded in it. |
 | `/lore add` | `/addlore` | Prefills a save-into-the-lore-library prompt on `build`. |
@@ -310,9 +316,9 @@ brainstorm, or you `/card` directly if the concept is already solid → `peak`
 drafts → auto self-review fires → finished card.
 
 **Deep-audit a card you're not sure about:**
-`/swarm` on the card → `review-swarm` runs 4 critics in parallel (prose,
-lore, macros, structure) and returns one merged report → you decide what to
-fix.
+`/swarm` on the card → `review-swarm` runs whichever of its 4 critics apply
+(prose, lore, macros, structure) in parallel and returns one merged report,
+noting which ran or were skipped and why → you decide what to fix.
 
 **Build a world first, then a character from it:**
 `/world` → `worldsmith` interviews you and authors a cohesive world, saves it
@@ -328,6 +334,12 @@ cascading conditional entries, keyed by regex on topic name/aliases.
 **Save reusable lore for later:**
 `/lore add` on `build` any time you want to bank worldbuilding you've worked
 out in conversation, independent of any specific card.
+
+**Break decision paralysis on one section:**
+`/takes` on `peak` or `build`, name the section (e.g. Scenario, or one
+Opening Message) → `draft-swarm` fans out 3 distinct-angle variants in
+parallel and shows them in full → you pick one or ask for a tweak → the agent
+locks it in and asks whether to draft the next section.
 
 ---
 
@@ -522,8 +534,9 @@ to cycle.
   (`/swarm` or plain-language "really scrutinize this").
 - **Tool calls in one turn run in parallel with no concurrency cap** (the
   underlying AI SDK maps tool calls through an unbounded `Promise.all`) —
-  this is what lets `review-swarm` fire all four critic subagents
-  simultaneously rather than one after another.
+  this is what lets `review-swarm` fire its applicable critic subagents
+  simultaneously rather than one after another, and what `draft-swarm` reuses
+  to draft several section variants at once instead of one at a time.
 - **The `tokenize` tool** wraps `gpt-tokenizer` (pure JS, no API key, text
   never leaves your machine) so `peak`/`build`/`review-structure` check
   actual token counts against the card/lorebook budget guidance instead of

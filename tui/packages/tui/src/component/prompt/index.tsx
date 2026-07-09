@@ -595,6 +595,25 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
+        title: "Draft section variants",
+        desc: "Draft 3 distinct takes on one card section and pick your favorite",
+        name: "card.variants",
+        category: "Cards",
+        slashName: "takes",
+        slashAliases: ["draftswarm"],
+        run: () => {
+          fillPrompt(
+            [
+              'Draft 3 distinct variants of just the section named below — not the whole card. Call the task tool with subagent_type: "draft-swarm", tell it which section this is, hand it the existing card context below for consistency, and ask for 3 variants with genuinely different creative angles (not just re-rolls). Show me all 3 in full, labeled Variant 1/2/3 — don\'t merge them or pick a favorite for me. Once I tell you which one I like (or how to modify it), use that version, then ask whether I want to draft another section next.',
+              "",
+              "Section to draft: <Scenario / Personality / one Opening Message / Example Dialogue>",
+              "",
+              "Existing card context (paste the card's other boxes here for consistency, if any):",
+            ].join("\n"),
+          )
+        },
+      },
+      {
         title: "Deep swarm review",
         desc: "Run a 4-lens audit (prose, lore, macros, structure) on the current card",
         name: "card.swarm",
