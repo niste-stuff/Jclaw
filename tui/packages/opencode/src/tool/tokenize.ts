@@ -2,14 +2,14 @@ import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
 import DESCRIPTION from "./tokenize.txt"
 
-type Encoder = (text: string) => number[]
-type Encoding = "o200k_base" | "cl100k_base"
+export type Encoder = (text: string) => number[]
+export type Encoding = "o200k_base" | "cl100k_base"
 
 // The BPE rank tables are a few MB per encoding, so load them lazily on first
 // use and cache — this keeps them off the startup path when nobody counts tokens.
 const encoders = new Map<Encoding, Encoder>()
 
-const loadEncoder = (encoding: Encoding): Promise<Encoder> => {
+export const loadEncoder = (encoding: Encoding): Promise<Encoder> => {
   const cached = encoders.get(encoding)
   if (cached) return Promise.resolve(cached)
   const load =

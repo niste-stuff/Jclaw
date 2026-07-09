@@ -1,0 +1,9 @@
+Check a card or lorebook field's real token count against jclaw's density bands, so you don't have to eyeball the numbers or remember the thresholds yourself.
+
+There is no fixed internal structure a card must follow — this tool does not validate section headers or card "shape". It only bands token counts:
+
+- `scenario` + `personality`: summed into the permanent per-turn budget. Bands: under 2k = under-specified, 2k-3k = sweet spot, 3k-6k = fine if genuinely lorepacked (dense, non-redundant), 6k-7k = past the healthy band (consider proposing a lorebook), 7k+ = bloated. Pass both together when you want the real permanent total, not two separate single-box counts.
+- `lorebook_hub`: the constant:true hub entry. Aim ~200-300 tokens, hard ceiling ~1000.
+- `lorebook_entry`: a single constant:false conditional entry. ~300 soft, ~400 hard.
+
+Pass only the fields you're actually checking — all are optional. Use this before presenting a finished card or lorebook entry, alongside (not instead of) the plain `tokenize` tool when you just need a raw count for something this tool doesn't band (like a single Opening Message).

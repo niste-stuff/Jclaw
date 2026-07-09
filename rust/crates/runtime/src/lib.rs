@@ -4,11 +4,9 @@
 //! MCP plumbing, tool-facing file operations, and the core conversation loop
 //! that drives interactive and one-shot turns.
 
-mod approval_tokens;
 mod bash;
 pub mod bash_validation;
 mod bootstrap;
-pub mod branch_lock;
 mod compact;
 mod config;
 pub mod config_validate;
@@ -34,32 +32,22 @@ pub mod plugin_lifecycle;
 mod policy_engine;
 mod prompt;
 pub mod recovery_recipes;
-mod remote;
-mod report_schema;
 pub mod sandbox;
 mod session;
 pub mod session_control;
 pub mod trident;
 pub use session_control::SessionStore;
-mod sse;
 pub mod stale_base;
 pub mod stale_branch;
 pub mod summary_compression;
 pub mod task_packet;
 pub mod task_registry;
 pub mod team_cron_registry;
-#[cfg(test)]
-mod trust_resolver;
 mod usage;
 pub mod worker_boot;
 
-pub use approval_tokens::{
-    ApprovalDelegationHop, ApprovalScope, ApprovalTokenAudit, ApprovalTokenError,
-    ApprovalTokenGrant, ApprovalTokenLedger, ApprovalTokenStatus,
-};
 pub use bash::{execute_bash, BashCommandInput, BashCommandOutput};
 pub use bootstrap::{BootstrapPhase, BootstrapPlan};
-pub use branch_lock::{detect_branch_lock_collisions, BranchLockCollision, BranchLockIntent};
 pub use compact::{
     compact_session, estimate_session_tokens, format_compact_summary,
     get_compact_continuation_message, should_compact, CompactionConfig, CompactionResult,
@@ -153,18 +141,6 @@ pub use recovery_recipes::{
     RecoveryAttemptType, RecoveryCommandResult, RecoveryContext, RecoveryEvent,
     RecoveryLedgerEntry, RecoveryRecipe, RecoveryResult, RecoveryStatusReport, RecoveryStep,
 };
-pub use remote::{
-    inherited_upstream_proxy_env, no_proxy_list, read_token, upstream_proxy_ws_url,
-    RemoteSessionContext, UpstreamProxyBootstrap, UpstreamProxyState, DEFAULT_REMOTE_BASE_URL,
-    DEFAULT_SESSION_TOKEN_PATH, DEFAULT_SYSTEM_CA_BUNDLE, NO_PROXY_HOSTS, UPSTREAM_PROXY_ENV_KEYS,
-};
-pub use report_schema::{
-    canonicalize_report, project_report, report_content_hash, report_schema_v1_registry,
-    CanonicalReportV1, ClaimKind, ConsumerCapabilities, FieldDelta, FieldDeltaState,
-    NegativeEvidence, NegativeFindingStatus, ProjectionProvenance, RedactionProvenance,
-    ReportClaim, ReportConfidence, ReportIdentity, ReportProjectionV1, ReportSchemaField,
-    ReportSchemaRegistry, SensitivityClass, DEFAULT_PROJECTION_POLICY_V1, REPORT_SCHEMA_V1,
-};
 pub use sandbox::{
     build_linux_sandbox_command, detect_container_environment, detect_container_environment_from,
     resolve_sandbox_status, resolve_sandbox_status_for_request, ContainerEnvironment,
@@ -175,7 +151,6 @@ pub use session::{
     ContentBlock, ConversationMessage, MessageRole, Session, SessionCompaction, SessionError,
     SessionFork, SessionHeartbeat, SessionLiveness, SessionPromptEntry,
 };
-pub use sse::{IncrementalSseParser, SseEvent};
 pub use stale_base::{
     check_base_commit, format_stale_base_warning, read_claw_base_file, resolve_expected_base,
     BaseCommitSource, BaseCommitState,
@@ -187,9 +162,6 @@ pub use stale_branch::{
 pub use task_packet::{
     validate_packet, TaskPacket, TaskPacketValidationError, TaskResource, ValidatedPacket,
 };
-pub use task_registry::{LaneBoard, LaneBoardEntry, LaneFreshness, LaneHeartbeat};
-#[cfg(test)]
-pub use trust_resolver::{TrustConfig, TrustDecision, TrustEvent, TrustPolicy, TrustResolver};
 pub use usage::{
     format_usd, pricing_for_model, ModelPricing, TokenUsage, UsageCostEstimate, UsageTracker,
 };

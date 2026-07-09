@@ -120,15 +120,11 @@ Jclaw/
 │   │   ├── commands/         Slash-command definitions for the Rust CLI layer
 │   │   ├── tools/            Rust-side tool implementations, incl.
 │   │   │                     card_tools.rs (card/lorebook validation),
-│   │   │                     pdf_extract.rs, lane_completion.rs
+│   │   │                     lane_completion.rs
 │   │   ├── api/               HTTP client layer for LLM providers (SSE
 │   │   │                     streaming, prompt caching, per-provider clients)
 │   │   ├── plugins/          Plugin/hook system for the Rust layer
 │   │   ├── telemetry/        Telemetry/observability
-│   │   ├── claw-analog/      Minimal standalone agent harness (tool loop +
-│   │   │                     permission enforcement)
-│   │   ├── claw-rag-service/ Workspace RAG service (SQLite index + embeddings)
-│   │   ├── compat-harness/   Upstream-parity test harness (see PARITY.md)
 │   │   └── mock-anthropic-service/  Mock Anthropic API server, for tests
 │   └── scripts/               Rust-side helper scripts
 │

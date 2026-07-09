@@ -1,0 +1,8 @@
+Check a card or lorebook field's text for macro problems, mechanically — so you don't have to eyeball it for the {{user}} collapse bug or a stray spaced placeholder.
+
+Flags three things:
+- Spaced placeholders like `{{ user }}` — Janitor only substitutes tight `{{name}}` with no internal spaces, so a spaced one silently fails to substitute.
+- Unknown double-brace macros — anything inside `{{...}}` that isn't `user`, `char`, `sub`, `obj`, `poss`, or `ref`.
+- The `{{user}}` -> "the user" collapse: text that uses the `{{user}}`/`{user}` macro somewhere but also spells out "the user" as literal prose elsewhere. This is a functional bug, not a style nit — that prose won't get substituted at runtime, and it's a strong tell the text was AI-dumped without an edit pass.
+
+This is a mechanical check, not a substitute for judgment — it won't catch every macro misuse (e.g. over-defining {{user}}'s gender), only the deterministic ones. Pass one field's text at a time.

@@ -15,6 +15,8 @@ import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { TokenizeTool } from "./tokenize"
+import { CardBudgetTool } from "./card_budget"
+import { CardMacroCheckTool } from "./card_macro_check"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
@@ -107,6 +109,8 @@ const layer = Layer.effect(
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
     const tokenizetool = yield* TokenizeTool
+    const cardbudgettool = yield* CardBudgetTool
+    const cardmacrochecktool = yield* CardMacroCheckTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -212,6 +216,8 @@ const layer = Layer.effect(
           skill: Tool.init(skilltool),
           patch: Tool.init(patchtool),
           tokenize: Tool.init(tokenizetool),
+          cardBudget: Tool.init(cardbudgettool),
+          cardMacroCheck: Tool.init(cardmacrochecktool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
@@ -236,6 +242,8 @@ const layer = Layer.effect(
             tool.skill,
             tool.patch,
             tool.tokenize,
+            tool.cardBudget,
+            tool.cardMacroCheck,
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             tool.plan,
             tool.planEnter,
