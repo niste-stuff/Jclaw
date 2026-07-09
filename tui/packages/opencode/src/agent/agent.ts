@@ -366,7 +366,7 @@ const layer = Layer.effect(
           },
           "review-swarm": {
             name: "review-swarm",
-            description: `Deep multi-lens review pass for character cards and lorebook entries. Fans a draft out to four specialist critics (prose, lore, macros, structure) in parallel and merges their findings into one report. Findings only, no rewrites. Use for an explicit deep-audit request; use "review" for the routine quick self-check.`,
+            description: `Deep multi-lens review pass for character cards and lorebook entries. Fans a draft out to whichever specialist critics apply (prose, lore, macros, structure) in parallel and merges their findings into one report. Findings only, no rewrites. Use for an explicit deep-audit request; use "review" for the routine quick self-check.`,
             prompt: PROMPT_REVIEW_SWARM,
             permission: Permission.merge(
               defaults,
