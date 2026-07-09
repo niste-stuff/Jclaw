@@ -640,20 +640,27 @@ export function Prompt(props: PromptProps) {
         run: () => {
           dialog.replace(() => (
             <DialogLore
-              onPick={(pick) =>
+              onPick={(picks) => {
+                const single = picks.length === 1
                 fillPrompt(
                   [
-                    `Build a full character card grounded in the lore at ${pick.path}`,
+                    single
+                      ? `Build a full character card grounded in the lore at ${picks[0].path}`
+                      : `Build a full character card grounded in the lore at:\n${picks.map((pick) => `- ${pick.path}`).join("\n")}`,
                     "",
-                    "Read that file first. Treat it as canon — pull the character, world, relationships, tone, and any hard facts straight from it, and don't invent details that contradict it. If the lore is too thin to build a real character from, switch to lore planning to develop it with me first instead of making things up.",
+                    single
+                      ? "Read that file first. Treat it as canon — pull the character, world, relationships, tone, and any hard facts straight from it, and don't invent details that contradict it. If the lore is too thin to build a real character from, switch to lore planning to develop it with me first instead of making things up."
+                      : "Read all of those files first. Treat them together as canon — pull the character, world, relationships, tone, and any hard facts from across all of them, and don't invent details that contradict any of them. If they conflict, flag the conflict and ask me how to resolve it before writing. If the combined lore is too thin to build a real character from, switch to lore planning to develop it with me first instead of making things up.",
                     "",
                     "Then author all four boxes — personality (shown through specifics and contradictions, not adjective lists), appearance, the slice of backstory that still shapes them now, a distinct speech style with example lines, and a scenario. Finish with an opening message that drops {{user}} into a live scene without acting or speaking for them.",
                     "",
-                    "If this lore is a whole world with more than one character in it, ask me which character or angle to build the card around before you start, rather than assuming a single subject.",
+                    single
+                      ? "If this lore is a whole world with more than one character in it, ask me which character or angle to build the card around before you start, rather than assuming a single subject."
+                      : "If this lore spans a whole world with more than one character in it, ask me which character or angle to build the card around before you start, rather than assuming a single subject.",
                   ].join("\n"),
                   "peak",
                 )
-              }
+              }}
             />
           ))
         },

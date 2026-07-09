@@ -361,6 +361,12 @@ fn prompt_subcommand_stdin_flag_appends_pipe_context_423() {
 
 #[test]
 fn compact_subcommand_json_fails_fast_when_stdin_closed() {
+    // #113: `claw compact` is now a real, functional subcommand — a mechanical
+    // trim of the resolved managed session (defaulting to "latest"), with no
+    // provider/REPL/TUI involved. In an empty workspace with zero managed
+    // sessions it should fail fast (no stdin read at all) with the same
+    // no_managed_sessions error shape as `claw --resume latest` (see
+    // resume_slash_commands.rs).
     let workspace = unique_temp_dir("compact-nontty-json");
     let config_home = workspace.join("config-home");
     let home = workspace.join("home");
@@ -390,24 +396,23 @@ fn compact_subcommand_json_fails_fast_when_stdin_closed() {
     let parsed: Value =
         serde_json::from_str(stdout.trim()).expect("stdout should be JSON error envelope");
     assert_eq!(parsed["status"], "error");
-    assert_eq!(parsed["error_kind"], "interactive_only");
+    assert_eq!(parsed["error_kind"], "no_managed_sessions");
     assert_eq!(parsed["action"], "abort");
     assert!(
         parsed["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("claw compact"),
-        "message should name compact: {parsed}"
+            .contains("no managed sessions found"),
+        "message should explain missing sessions: {parsed}"
     );
-    // #749: hint must be non-empty (was null before fix — same class as #738/#745/#746)
     let hint = parsed["hint"].as_str().unwrap_or("");
     assert!(
         !hint.is_empty(),
-        "compact interactive-only JSON must have non-empty hint (#749); got: {parsed}"
+        "compact JSON must have non-empty hint; got: {parsed}"
     );
     assert!(
-        hint.contains("/compact") || hint.contains("--resume"),
-        "hint should mention /compact or --resume: {hint}"
+        hint.contains("--resume"),
+        "hint should mention --resume: {hint}"
     );
 
     fs::remove_dir_all(&workspace).expect("workspace cleanup should succeed");
@@ -415,6 +420,7 @@ fn compact_subcommand_json_fails_fast_when_stdin_closed() {
 
 #[test]
 fn compact_subcommand_text_fails_fast_when_stdin_closed() {
+    // #113: text-mode counterpart of the JSON case above.
     let workspace = unique_temp_dir("compact-nontty-text");
     let config_home = workspace.join("config-home");
     let home = workspace.join("home");
@@ -441,10 +447,10 @@ fn compact_subcommand_text_fails_fast_when_stdin_closed() {
     );
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
     assert!(
-        stderr.contains("[error-kind: interactive_only]"),
+        stderr.contains("[error-kind: no_managed_sessions]"),
         "{stderr}"
     );
-    assert!(stderr.contains("claw compact"), "{stderr}");
+    assert!(stderr.contains("no managed sessions found"), "{stderr}");
 
     fs::remove_dir_all(&workspace).expect("workspace cleanup should succeed");
 }

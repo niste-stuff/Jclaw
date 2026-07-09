@@ -295,6 +295,10 @@ const OFFICIAL_REPO_SLUG: &str = "ultraworkers/claw-code";
 const DEPRECATED_INSTALL_COMMAND: &str = "cargo install claw-code";
 const LATEST_SESSION_REFERENCE: &str = "latest";
 const SESSION_REFERENCE_ALIASES: &[&str] = &[LATEST_SESSION_REFERENCE, "last", "recent"];
+// #113: sentinel reference resolved through the active-session pointer file
+// rather than the session store's own alias table, so it lives alongside the
+// other well-known references instead of inside SESSION_REFERENCE_ALIASES.
+const ACTIVE_SESSION_REFERENCE: &str = "active";
 const CLI_OPTION_SUGGESTIONS: &[&str] = &[
     "--help",
     "-h",
@@ -462,6 +466,10 @@ fn classify_error_kind(message: &str) -> &'static str {
         "session_not_found"
     } else if message.contains("no managed sessions found") {
         "no_managed_sessions"
+    } else if message.contains("no active session set") {
+        "no_active_session"
+    } else if message.starts_with("unsupported_session_action:") {
+        "unsupported_session_action"
     } else if message.contains("legacy session is missing workspace binding") {
         // #780: must precede the generic "failed to restore session" arm — the full
         // error message is "failed to restore session: legacy session is missing workspace
@@ -1121,6 +1129,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(2);
         }
         CliAction::SessionList { output_format } => run_session_list(output_format)?,
+        CliAction::SessionAction {
+            action,
+            target,
+            branch_name,
+            force,
+            output_format,
+        } => run_session_action(
+            &action,
+            target.as_deref(),
+            branch_name,
+            force,
+            output_format,
+        )?,
+        CliAction::Compact {
+            session_reference,
+            output_format,
+        } => run_compact_command(&session_reference, output_format)?,
         CliAction::State { output_format } => run_worker_state(output_format)?,
         CliAction::Init { output_format } => run_init(output_format)?,
         // #146: dispatch pure-local introspection. Text mode uses existing
@@ -1206,6 +1231,21 @@ enum CliAction {
         output_format: CliOutputFormat,
     },
     SessionList {
+        output_format: CliOutputFormat,
+    },
+    // #113: `claw session <action>` outside a resumed/interactive context —
+    // list is handled by SessionList above; this covers exists/delete/switch/fork.
+    SessionAction {
+        action: String,
+        target: Option<String>,
+        branch_name: Option<String>,
+        force: bool,
+        output_format: CliOutputFormat,
+    },
+    // #113: top-level `claw compact [SESSION]` — mechanical trim via
+    // runtime::trident::trident_compact_session, no LLM call.
+    Compact {
+        session_reference: String,
         output_format: CliOutputFormat,
     },
     ResumeSession {
@@ -1890,15 +1930,27 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     if rest.first().map(String::as_str) == Some("resume") {
         return parse_resume_args(&rest[1..], output_format, allow_broad_cwd);
     }
-    // #696: `claw compact` is the bare name of the interactive `/compact`
-    // slash command, not a prompt. When extra args such as `--help` appear
-    // after the word `compact`, the generic prompt fallback used to send
-    // `compact --help` to provider startup and could hang under closed stdin /
-    // JSON output. Fail closed before any provider, prompt, TUI, or spinner
-    // startup. `claw --resume SESSION.jsonl /compact` remains the supported
-    // non-interactive session compaction path.
+    // #113: `claw compact [SESSION]` mechanically trims an existing managed
+    // session in place via runtime::trident::trident_compact_session — the
+    // same algorithm the interactive `/compact` slash command already uses,
+    // just exposed as a direct subcommand. No provider call, no REPL/TUI
+    // startup, so it's safe under closed stdin / JSON output.
     if rest.first().map(String::as_str) == Some("compact") {
-        return Err(compact_interactive_only_error());
+        let args = &rest[1..];
+        let session_reference = match args {
+            [] => LATEST_SESSION_REFERENCE.to_string(),
+            [only] if !only.starts_with('-') => only.clone(),
+            _ => {
+                return Err(format!(
+                    "unexpected_extra_args: unexpected compact argument(s): {}.\nUsage: claw compact [SESSION]",
+                    args.join(" ")
+                ));
+            }
+        };
+        return Ok(CliAction::Compact {
+            session_reference,
+            output_format,
+        });
     }
     if let Some(action) = parse_single_word_command_alias(
         &rest,
@@ -2024,17 +2076,67 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         // #767: `claw session bogus` bypassed parse_single_word_command_alias (rest.len()>1),
         // had no match arm, and fell to CliAction::Prompt — reaching the credential gate
         // instead of a structured error. Mirror the guard on `permissions`.
+        // #113: `claw session <action>` is a pure local filesystem operation
+        // (managed session store + the CLI's own active-session pointer) —
+        // no API credentials or interactive REPL needed for any of these.
         "session" => {
-            // #449: `claw session list` is a pure local filesystem read that
-            // requires no API credentials. Route directly to SessionList instead
-            // of falling through to the resume/auth path.
-            if rest.get(1).map(|s| s.as_str()) == Some("list") {
-                Ok(CliAction::SessionList { output_format })
-            } else {
-                let action_hint = rest.get(1).map_or(String::new(), |a| format!(" (got: `{a}`)" ));
-                Err(format!(
-                    "interactive_only: `claw session` is a slash command{action_hint}.\nUse `claw --resume SESSION.jsonl /session <action>` or start `claw` and run `/session [list|exists|switch|fork|delete]`."
-                ))
+            let action = rest.get(1).map(String::as_str);
+            match action {
+                None | Some("list") => Ok(CliAction::SessionList { output_format }),
+                Some(action @ ("exists" | "delete" | "switch" | "fork")) => {
+                    // `fork` operates on the active/latest session and its lone
+                    // positional is a branch name; the others take a session-id
+                    // target. Keep them in one arm since the flag grammar
+                    // (--force / --branch) and error shape are identical.
+                    let is_fork = action == "fork";
+                    let mut target: Option<String> = None;
+                    let mut branch_name: Option<String> = None;
+                    let mut force = false;
+                    let mut index = 2;
+                    while index < rest.len() {
+                        match rest[index].as_str() {
+                            "--force" => {
+                                force = true;
+                                index += 1;
+                            }
+                            "--branch" if is_fork => {
+                                let value = rest.get(index + 1).ok_or_else(|| {
+                                    "missing_flag_value: missing value for --branch.\nUsage: claw session fork [branch-name] | claw session fork --branch <name>".to_string()
+                                })?;
+                                branch_name = Some(value.clone());
+                                index += 2;
+                            }
+                            flag if is_fork && flag.starts_with("--branch=") => {
+                                branch_name = Some(flag[9..].to_string());
+                                index += 1;
+                            }
+                            other if other.starts_with('-') => {
+                                return Err(format!("unknown_option: unknown session option: {other}.\nRun `claw session --help` for usage."));
+                            }
+                            other if is_fork && branch_name.is_none() => {
+                                branch_name = Some(other.to_string());
+                                index += 1;
+                            }
+                            other if !is_fork && target.is_none() => {
+                                target = Some(other.to_string());
+                                index += 1;
+                            }
+                            other => {
+                                return Err(format!("unexpected_extra_args: unexpected session argument: {other}.\nUsage: claw session {action} [target] [--force]"));
+                            }
+                        }
+                    }
+                    Ok(CliAction::SessionAction {
+                        action: action.to_string(),
+                        target,
+                        branch_name,
+                        force,
+                        output_format,
+                    })
+                }
+                Some(other) => Err(format!(
+                    "unsupported_session_action: `claw session {other}` is not supported.\nRun `claw session --help` for usage, or use `claw --resume SESSION.jsonl /session <action>`."
+                )),
             }
         }
         // #770: same fallthrough gap as #767 — these slash commands had no multi-arg match arm
@@ -2498,12 +2600,6 @@ fn bare_slash_command_guidance(command_name: &str) -> Option<String> {
     };
     // #772: help text still mentions the alias, but the remediation shows canonical form
     Some(guidance)
-}
-
-fn compact_interactive_only_error() -> String {
-    // #749: newline before remediation so split_error_hint populates hint field
-    "interactive_only: `claw compact` is an interactive/session command.\nStart `claw` and run `/compact`, or use `claw --resume SESSION.jsonl /compact` to compact an existing session."
-        .to_string()
 }
 
 fn removed_auth_surface_error(command_name: &str) -> String {
@@ -4063,7 +4159,7 @@ fn run_worker_state(output_format: CliOutputFormat) -> Result<(), Box<dyn std::e
         //     Or:    claw prompt <text> # run one non-interactive turn
         //     Then rerun: claw state [--output-format json]
         return Err(format!(
-            "no worker state file found at {path}\n  Hint: worker state is written by the interactive REPL or a non-interactive prompt.\n  Run:   claw               # start the REPL (writes state on first turn)\n  Or:    claw prompt <text> # run one non-interactive turn\n  Then rerun: claw state [--output-format json]",
+            "no worker state file found at {path}\n  Hint: worker state is written by a non-interactive prompt turn.\n  Run:   claw prompt <text> # run one non-interactive turn\n  Then rerun: claw state [--output-format json]",
             path = state_path.display()
         )
         .into());
@@ -9254,7 +9350,39 @@ fn create_managed_session_handle(
     })
 }
 
+// #113: `active` is a CLI-layer convenience on top of the session store, not a
+// concept the store itself knows about — it just points at whichever session
+// `claw session switch`/`fork` last recorded. Kept out of runtime::session_control
+// entirely so non-CLI consumers (the TUI, other runtime callers) are unaffected.
+fn active_session_pointer_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    Ok(sessions_dir()?.join(".active-session"))
+}
+
+fn write_active_session_pointer(session_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let path = active_session_pointer_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, session_id)?;
+    Ok(())
+}
+
+fn read_active_session_pointer() -> Option<String> {
+    let path = active_session_pointer_path().ok()?;
+    let content = fs::read_to_string(path).ok()?;
+    let trimmed = content.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn no_active_session_error() -> Box<dyn std::error::Error> {
+    "no active session set: nothing has been switched to yet.\n  Hint: run `claw session switch <id>` (or `claw session fork <id>`) first, or pass `latest`/a session id directly.".into()
+}
+
 fn resolve_session_reference(reference: &str) -> Result<SessionHandle, Box<dyn std::error::Error>> {
+    if reference == ACTIVE_SESSION_REFERENCE {
+        let active_id = read_active_session_pointer().ok_or_else(no_active_session_error)?;
+        return resolve_session_reference(&active_id);
+    }
     let handle = current_session_store()?
         .resolve_reference(reference)
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
@@ -9324,6 +9452,10 @@ fn load_session_reference_excluding(
     reference: &str,
     exclude_id: Option<&str>,
 ) -> Result<(SessionHandle, Session), Box<dyn std::error::Error>> {
+    if reference == ACTIVE_SESSION_REFERENCE {
+        let active_id = read_active_session_pointer().ok_or_else(no_active_session_error)?;
+        return load_session_reference_excluding(&active_id, exclude_id);
+    }
     let store = current_session_store()?;
     let loaded = store
         .load_session_excluding(reference, exclude_id)
@@ -9491,24 +9623,64 @@ fn run_resumed_session_command(
                 })),
             })
         }
-        // #113: /session switch and /session fork require an interactive REPL —
-        // return structured JSON instead of a raw error so resume callers can
-        // detect the limitation programmatically.
-        Some(switch_or_fork @ ("switch" | "fork")) => Ok(ResumeCommandOutcome {
-            session: session.clone(),
-            message: Some(format!(
-                "/session {switch_or_fork} requires an interactive REPL.\nUsage: claw (then /session {switch_or_fork} <id>)"
-            )),
-            json: Some(serde_json::json!({
-                "kind": "error",
-                "error_kind": "unsupported_resumed_command",
-                "status": "error",
-                "action": switch_or_fork,
-                "error": format!("/session {switch_or_fork} requires an interactive REPL"),
-                "hint": format!("Start a new claw session and use /session {switch_or_fork} <id> interactively"),
-            })),
-        }),
-        Some(other) => Err(format!("unsupported_resumed_command: /session {other} is not supported in resume mode.\nSupported: list, exists, delete").into()),
+        // #113: /session switch and /session fork now work outside the
+        // interactive REPL, backed by the CLI's active-session pointer file
+        // (see write_active_session_pointer / read_active_session_pointer).
+        Some("switch") => {
+            let Some(target) = target else {
+                return Err("/session switch requires a session id.\nUsage: claw --resume <session> /session switch <session-id>".into());
+            };
+            let (handle, switched_session) = load_session_reference(target)?;
+            write_active_session_pointer(&handle.id)?;
+            Ok(ResumeCommandOutcome {
+                session: switched_session,
+                message: Some(format!(
+                    "Session switched\n  Active session   {}\n  File             {}",
+                    handle.id,
+                    handle.path.display(),
+                )),
+                json: Some(serde_json::json!({
+                    "kind": "session_switch",
+                    "action": "switch",
+                    "status": "ok",
+                    "session_id": handle.id,
+                    "path": handle.path.display().to_string(),
+                })),
+            })
+        }
+        Some("fork") => {
+            // In resumed-session slash-command form, `target` is the optional
+            // branch name (matching SlashCommand::Session parsing), and the
+            // fork source is always the currently loaded session.
+            let parent_session_id = session.session_id.clone();
+            let forked = current_session_store()?
+                .fork_session(session, target.map(ToOwned::to_owned))
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            write_active_session_pointer(&forked.handle.id)?;
+            let message_count = forked.session.messages.len();
+            Ok(ResumeCommandOutcome {
+                session: forked.session.clone(),
+                message: Some(format!(
+                    "Session forked\n  Parent session   {}\n  Active session   {}\n  Branch           {}\n  File             {}\n  Messages         {}",
+                    parent_session_id,
+                    forked.handle.id,
+                    forked.branch_name.as_deref().unwrap_or("(unnamed)"),
+                    forked.handle.path.display(),
+                    message_count,
+                )),
+                json: Some(serde_json::json!({
+                    "kind": "session_fork",
+                    "action": "fork",
+                    "status": "ok",
+                    "parent_session_id": parent_session_id,
+                    "session_id": forked.handle.id,
+                    "branch_name": forked.branch_name,
+                    "path": forked.handle.path.display().to_string(),
+                    "messages": message_count,
+                })),
+            })
+        }
+        Some(other) => Err(format!("unsupported_resumed_command: /session {other} is not supported in resume mode.\nSupported: list, exists, delete, switch, fork").into()),
     }
 }
 
@@ -9558,9 +9730,13 @@ fn run_session_list(output_format: CliOutputFormat) -> Result<(), Box<dyn std::e
     let sessions = list_managed_sessions().unwrap_or_default();
     let session_ids: Vec<String> = sessions.iter().map(|s| s.id.clone()).collect();
     let session_details = session_details_json(&sessions);
+    // #113: outside a resumed session there's no "current" session to mark —
+    // fall back to whatever `claw session switch`/`fork` last recorded.
+    let active = read_active_session_pointer();
     match output_format {
         CliOutputFormat::Text => {
-            let text = render_session_list("").unwrap_or_else(|e| format!("error: {e}"));
+            let text = render_session_list(active.as_deref().unwrap_or(""))
+                .unwrap_or_else(|e| format!("error: {e}"));
             println!("{text}");
         }
         CliOutputFormat::Json => {
@@ -9572,12 +9748,164 @@ fn run_session_list(output_format: CliOutputFormat) -> Result<(), Box<dyn std::e
                     "action": "list",
                     "sessions": session_ids,
                     "session_details": session_details,
-                    "active": serde_json::Value::Null,
+                    "active": active,
                 })
             );
         }
     }
     Ok(())
+}
+
+fn run_session_action(
+    action: &str,
+    target: Option<&str>,
+    branch_name: Option<String>,
+    force: bool,
+    output_format: CliOutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        "exists" => {
+            let Some(target) = target else {
+                return Err("missing_argument: `claw session exists` requires a session id.\nUsage: claw session exists <session-id>".into());
+            };
+            let active_id = read_active_session_pointer().unwrap_or_default();
+            let value = session_exists_json(target, &active_id)?;
+            let exists = value
+                .get("exists")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            match output_format {
+                CliOutputFormat::Text => println!(
+                    "Session exists\n  Session          {target}\n  Exists           {}",
+                    if exists { "yes" } else { "no" }
+                ),
+                CliOutputFormat::Json => println!("{}", serde_json::to_string_pretty(&value)?),
+            }
+            Ok(())
+        }
+        "delete" => {
+            let Some(target) = target else {
+                return Err("missing_argument: `claw session delete` requires a session id.\nUsage: claw session delete <session-id> [--force]".into());
+            };
+            let handle = resolve_session_reference(target)?;
+            if read_active_session_pointer().as_deref() == Some(handle.id.as_str()) {
+                return Err(format!(
+                    "delete: refusing to delete the active session '{}'. Switch to another session first with `claw session switch <session-id>`.",
+                    handle.id
+                )
+                .into());
+            }
+            if !force {
+                if output_format == CliOutputFormat::Json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "kind": "error",
+                            "error": "confirmation required",
+                            "hint": format!("rerun with claw session delete {} --force", handle.id),
+                            "session_id": handle.id,
+                        }))?
+                    );
+                    return Ok(());
+                }
+                if !confirm_session_deletion(&handle.id) {
+                    println!("delete: cancelled.");
+                    return Ok(());
+                }
+            }
+            delete_managed_session(&handle.path)?;
+            let report = format!(
+                "Session deleted\n  Deleted session  {}\n  File             {}",
+                handle.id,
+                handle.path.display(),
+            );
+            match output_format {
+                CliOutputFormat::Text => println!("{report}"),
+                CliOutputFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "kind": "session_delete",
+                        "action": "delete",
+                        "status": "ok",
+                        "deleted": true,
+                        "session_id": handle.id,
+                        "path": handle.path.display().to_string(),
+                    }))?
+                ),
+            }
+            Ok(())
+        }
+        "switch" => {
+            let Some(target) = target else {
+                return Err("missing_argument: `claw session switch` requires a session id.\nUsage: claw session switch <session-id>".into());
+            };
+            let handle = resolve_session_reference(target)?;
+            write_active_session_pointer(&handle.id)?;
+            let report = format!(
+                "Session switched\n  Active session   {}\n  File             {}",
+                handle.id,
+                handle.path.display(),
+            );
+            match output_format {
+                CliOutputFormat::Text => println!("{report}"),
+                CliOutputFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "kind": "session_switch",
+                        "action": "switch",
+                        "status": "ok",
+                        "session_id": handle.id,
+                        "path": handle.path.display().to_string(),
+                    }))?
+                ),
+            }
+            Ok(())
+        }
+        "fork" => {
+            // #113: fork always branches off the active session (falling back to
+            // the newest one if nothing has been switched to yet), matching the
+            // REPL's `/session fork [branch-name]` semantics — it never takes a
+            // session id target.
+            let source_reference =
+                read_active_session_pointer().unwrap_or_else(|| LATEST_SESSION_REFERENCE.to_string());
+            let (_source_handle, session) = load_session_reference(&source_reference)?;
+            let parent_session_id = session.session_id.clone();
+            let forked = current_session_store()?
+                .fork_session(&session, branch_name)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            write_active_session_pointer(&forked.handle.id)?;
+            let message_count = forked.session.messages.len();
+            let report = format!(
+                "Session forked\n  Parent session   {}\n  Active session   {}\n  Branch           {}\n  File             {}\n  Messages         {}",
+                parent_session_id,
+                forked.handle.id,
+                forked.branch_name.as_deref().unwrap_or("(unnamed)"),
+                forked.handle.path.display(),
+                message_count,
+            );
+            match output_format {
+                CliOutputFormat::Text => println!("{report}"),
+                CliOutputFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "kind": "session_fork",
+                        "action": "fork",
+                        "status": "ok",
+                        "parent_session_id": parent_session_id,
+                        "session_id": forked.handle.id,
+                        "branch_name": forked.branch_name,
+                        "path": forked.handle.path.display().to_string(),
+                        "messages": message_count,
+                    }))?
+                ),
+            }
+            Ok(())
+        }
+        other => Err(format!(
+            "unsupported_session_action: `claw session {other}` is not supported.\nRun `claw session --help` for usage, or use `claw --resume SESSION.jsonl /session <action>`."
+        )
+        .into()),
+    }
 }
 
 fn format_session_modified_age(modified_epoch_millis: u128) -> String {
@@ -10293,10 +10621,10 @@ fn render_help_topic(topic: LocalHelpTopic) -> String {
             .to_string(),
         LocalHelpTopic::State => "State
   Usage            claw state [--output-format <format>]
-  Purpose          read .claw/worker-state.json written by the interactive REPL or a one-shot prompt
+  Purpose          read .claw/worker-state.json written by a one-shot prompt
   Output           worker id, model, permissions, session reference (text or json)
   Formats          text (default), json
-  Produces state   `claw` (interactive REPL) or `claw prompt <text>` (one non-interactive turn)
+  Produces state   `claw prompt <text>` (one non-interactive turn)
   Observes state   `claw state` reads; clawhip/CI may poll this file without HTTP
   Exit codes       0 if state file exists and parses; 1 with actionable hint otherwise
   Related          claw status · ROADMAP #139 (this worker-concept contract)"
@@ -10305,20 +10633,22 @@ fn render_help_topic(topic: LocalHelpTopic) -> String {
             "Resume\n  Usage            claw resume [session-path|session-id|{LATEST_SESSION_REFERENCE}] [/slash-command ...] [--output-format <format>]\n  Alias            claw --resume [session-path|session-id|{LATEST_SESSION_REFERENCE}]\n  Purpose          restore or inspect a saved session without starting a new provider turn\n  Output           session restore or resume-safe command output; missing sessions return session_not_found\n  Formats          text (default), json\n  Related          /resume · /session list · claw --resume {LATEST_SESSION_REFERENCE} /status"
         ),
         LocalHelpTopic::Session => "Session
-  Usage            claw session --help [--output-format <format>]
-  Purpose          show /session command guidance without loading config, credentials, or a session
-  Actions          list · exists <id> · switch <id> · fork <name> · delete <id>
-  Direct use       run /session in the REPL or claw --resume SESSION.jsonl /session <action>
+  Usage            claw session [list|exists|switch|fork|delete] [target] [--branch name] [--force] [--output-format <format>]
+  Purpose          inspect and manage managed sessions (.claw/sessions/) without starting a provider turn
+  Actions          list (default) · exists <id> · switch <id> · fork [branch-name] · delete <id> [--force]
+  Active session   switch/fork record a pointer (`claw session switch <id>`); `active` can be used as a reference anywhere a session id is accepted
+  Also usable      claw --resume SESSION.jsonl /session <action> · /session <action> in the REPL
   Formats          text (default), json
-  Related          claw resume · claw export · .claw/sessions/"
+  Related          claw resume · claw export · claw compact · .claw/sessions/"
             .to_string(),
         LocalHelpTopic::Compact => "Compact
-  Usage            claw compact --help [--output-format <format>]
-  Purpose          show compaction guidance without loading config, credentials, or a session
-  Direct use       run /compact in the REPL or claw --resume SESSION.jsonl /compact
-  Output           compaction removes older tool-detail messages when the selected session is large enough
+  Usage            claw compact [SESSION] [--output-format <format>]
+  Purpose          mechanically trim older tool-call/tool-result detail from a managed session in place
+  Defaults         SESSION defaults to latest (most recent managed session in .claw/sessions/)
+  Also usable      run /compact in the REPL or claw --resume SESSION.jsonl /compact
+  Output           reports removed vs. kept message counts; a no-op reports skipped
   Formats          text (default), json
-  Related          claw resume · /compact · /status"
+  Related          claw resume · claw session · /status"
             .to_string(),
         LocalHelpTopic::Export => "Export
   Usage            claw export [--session <id|latest>] [--output <path>] [--output-format <format>]
@@ -11846,6 +12176,44 @@ fn summarize_tool_payload_for_markdown(payload: &str) -> String {
         return String::new();
     }
     truncate_for_summary(&compact, SESSION_MARKDOWN_TOOL_SUMMARY_LIMIT)
+}
+
+// #113: top-level `claw compact [SESSION]` — same mechanical-trim algorithm
+// as the resumed-session `/compact` slash command (see the SlashCommand::Compact
+// arm in run_resume_command), reused here so the two don't drift apart.
+fn run_compact_command(
+    session_reference: &str,
+    output_format: CliOutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (handle, session) = load_session_reference(session_reference)?;
+    let result = runtime::trident::trident_compact_session(
+        &session,
+        CompactionConfig {
+            max_estimated_tokens: 0,
+            ..CompactionConfig::default()
+        },
+        &runtime::trident::TridentConfig::default(),
+    );
+    let removed = result.removed_message_count;
+    let kept = result.compacted_session.messages.len();
+    let skipped = removed == 0;
+    result.compacted_session.save_to_path(&handle.path)?;
+    let report = format_compact_report(removed, kept, skipped);
+    match output_format {
+        CliOutputFormat::Text => println!("{report}"),
+        CliOutputFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "kind": "compact",
+                "status": "ok",
+                "session_id": handle.id,
+                "skipped": skipped,
+                "removed_messages": removed,
+                "kept_messages": kept,
+            }))?
+        ),
+    }
+    Ok(())
 }
 
 fn run_export(
@@ -16246,8 +16614,8 @@ mod tests {
             "error should name `claw prompt <text>` as a producer: {message}"
         );
         assert!(
-            message.contains("REPL"),
-            "error should mention the interactive REPL as a producer: {message}"
+            !message.contains("REPL"),
+            "the REPL was removed; error should not point claws at it: {message}"
         );
         assert!(
             message.contains("claw state"),

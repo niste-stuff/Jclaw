@@ -3726,11 +3726,15 @@ fn resume_non_slash_trailing_arg_has_typed_error_kind_and_hint_768() {
 }
 
 #[test]
-fn session_with_unknown_subcommand_returns_interactive_only_not_credentials_767() {
+fn session_with_unknown_subcommand_returns_structured_error_not_credentials_767() {
     // #767: `claw session bogus` bypassed all guards and fell through to
     // CliAction::Prompt, reaching the credential-check gate and returning
     // error_kind:"missing_credentials" instead of a structured routing error.
-    // Fix: explicit "session" match arm returns interactive_only guidance.
+    // Fix: explicit "session" match arm returns a structured routing error.
+    // #113: session exists/delete/switch/fork/list are now real, functional
+    // subcommands (no longer interactive-only) — a genuinely unknown action
+    // like "bogus" now gets its own error_kind instead of borrowing
+    // interactive_only.
     let root = unique_temp_dir("session-unknown-767");
     fs::create_dir_all(&root).expect("temp dir should exist");
 
@@ -3751,8 +3755,8 @@ fn session_with_unknown_subcommand_returns_interactive_only_not_credentials_767(
             serde_json::from_str(json_line).expect("error envelope should be valid JSON");
 
         assert_eq!(
-            parsed["error_kind"], "interactive_only",
-            "claw session {sub} must return error_kind:interactive_only (#767), not missing_credentials"
+            parsed["error_kind"], "unsupported_session_action",
+            "claw session {sub} must return error_kind:unsupported_session_action (#767/#113), not missing_credentials"
         );
         let hint = parsed["hint"].as_str().unwrap_or("");
         assert!(
@@ -3947,9 +3951,9 @@ fn interactive_only_guard_batch_769_to_771() {
         .ok();
 
     let cases: &[&[&str]] = &[
-        // #769: session with unknown subcommand
-        &["session", "bogus"],
-        &["session", "nuke"],
+        // #769: session with unknown subcommand now returns its own
+        // error_kind:unsupported_session_action — covered separately by
+        // session_with_unknown_subcommand_returns_structured_error_not_credentials_767 (#113).
         // #770: slash-only verbs with trailing args
         &["cost", "breakdown"],
         &["clear", "--force"],
