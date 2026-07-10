@@ -25,6 +25,7 @@ import PROMPT_REVIEW_STRUCTURE from "./prompt/review-structure.txt"
 import PROMPT_REVIEW_SWARM from "./prompt/review-swarm.txt"
 import PROMPT_SECTION_DRAFT from "./prompt/section-draft.txt"
 import PROMPT_DRAFT_SWARM from "./prompt/draft-swarm.txt"
+import PROMPT_VOICE_PROFILER from "./prompt/voice-profiler.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
@@ -431,6 +432,26 @@ const layer = Layer.effect(
             options: {},
             mode: "subagent",
             native: true,
+          },
+          "voice-profiler": {
+            name: "voice-profiler",
+            description: `Extracts a creator's writing voice (box-formatting conventions, macro/pronoun habits, prose register) from sample cards handed to it inline, and returns a reusable profile document. Never authors content, never quotes samples at length.`,
+            prompt: PROMPT_VOICE_PROFILER,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
           },
           explore: {
             name: "explore",

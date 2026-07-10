@@ -50,6 +50,7 @@ import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { DialogLore } from "../dialog-lore"
+import { DialogVoice } from "../dialog-voice"
 import { Global } from "@opencode-ai/core/global"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
@@ -751,6 +752,53 @@ export function Prompt(props: PromptProps) {
             ].join("\n"),
             "build",
           )
+        },
+      },
+      {
+        title: "Build a voice profile",
+        desc: "Analyze sample cards and save a reusable voice profile",
+        name: "card.voiceAdd",
+        category: "Cards",
+        slashName: "voiceadd",
+        slashAliases: ["addvoice"],
+        run: () => {
+          fillPrompt(
+            [
+              "Build a voice profile from sample cards so I can author new cards in this creator's style later.",
+              "",
+              "Tell me the creator/voice name to save it under, plus the sample card file paths (or paste the sample text directly) to analyze. Once you have samples, read any file paths yourself, then call the task tool with subagent_type: \"voice-profiler\" and hand it the raw sample text inline — never just the file paths. Take the returned profile and save it to " +
+                path.join(Global.Path.lore, "voices") +
+                "/<name>.md (kebab-case). Ask before overwriting an existing profile, and confirm the path when you're done.",
+              "",
+              "<name the creator/voice, and give me sample file paths or pasted text>",
+            ].join("\n"),
+            "build",
+          )
+        },
+      },
+      {
+        title: "Author in a saved voice",
+        desc: "Pick a voice profile and write new, original content in that style",
+        name: "card.voice",
+        category: "Cards",
+        slashName: "voice",
+        run: () => {
+          dialog.replace(() => (
+            <DialogVoice
+              onPick={(pick) => {
+                fillPrompt(
+                  [
+                    `Author using the voice profile at ${pick.path}.`,
+                    "",
+                    "Read it first, then closely follow its formatting conventions, macro/pronoun habits, and prose register while writing fully original content — never reuse or lift phrasing from the profile itself, match the pattern, not the text.",
+                    "",
+                    "<describe the card or section you want written here>",
+                  ].join("\n"),
+                  "peak",
+                )
+              }}
+            />
+          ))
         },
       },
       {

@@ -201,6 +201,13 @@ card, but the intended flow for anything nontrivial is:
 4. **Review** the finished card before you ship it (`review`,
    `review-swarm`).
 
+Separately, you can also build a **voice profile** (`/voice add`) from a
+specific creator's sample cards — their box-formatting conventions,
+macro/pronoun habits, and prose register, extracted once and saved to your
+lore library — then hand it to `peak` (`/voice`) to author brand-new,
+original content that closely matches that creator's style without copying
+their actual phrasing.
+
 A JanitorAI card has exactly four platform-fixed boxes — **Scenario**,
 **Personality**, **Opening Messages** (up to 10 slots, only one loads per
 chat), and **Example Dialogue** — plus, optionally, an attached **lorebook**
@@ -239,6 +246,7 @@ behalf — see [Agent-initiated switching](#11-how-it-works) below).
 | review-structure | yes | Swarm lens: structural correctness and token economics (uses the `tokenize` tool). |
 | **draft-swarm** | no | Generates several distinct creative takes on a single card section (not a whole card) in parallel, then presents them for you to pick or modify before moving on. Trigger with `/takes`. |
 | section-draft | yes | draft-swarm's worker: writes one variant of one section, given a specific creative angle. |
+| voice-profiler | yes | Extracts a specific creator's box-formatting conventions, macro/pronoun habits, and prose register from sample cards handed to it inline, and returns a reusable profile document — never quotes samples at length, never authors content. Spawned by `build` via `/voice add`. |
 | **general** | no | General-purpose research/multi-step execution helper. |
 | **explore** | no | Fast, read-only codebase/file explorer (file search, grep, architecture questions). |
 | compaction / title / summary | yes | Internal housekeeping agents (context compaction, session titling/summarizing) — not user-facing. |
@@ -269,6 +277,8 @@ Type `/` in the composer, or open the command palette with `ctrl+p`.
 | `/lore` | — | Opens a picker over your lore library, then hands the picked file's path to `peak` to build a card grounded in it. |
 | `/lore add` | `/addlore` | Prefills a save-into-the-lore-library prompt on `build`. |
 | `/world` | `/worldbuild` | Prefills a generate-a-cohesive-world prompt and switches to `worldsmith`; the world is saved under `worlds/` in your lore library. |
+| `/voice add` | `/addvoice` | Prefills a build-a-voice-profile prompt on `build` — point it at a creator's sample cards, it delegates to `voice-profiler` and saves the result under `voices/` in your lore library. |
+| `/voice` | — | Opens a picker over saved voice profiles, then hands the picked profile's path to `peak` to author fresh, original content closely matching that creator's formatting/macro/prose patterns. |
 | `/move` | — | Move the session to another project directory. |
 | `/editor` | — | Open your external `$EDITOR` for composing a longer prompt. |
 | `/clearcontext` | — | Remove attached editor/file context from the composer. |
@@ -699,7 +709,7 @@ redacts file paths/contents/URLs as `[redacted:kind:id]` before you share it.
 |---|---|
 | `~/.config/opencode` | Config files (`opencode.json`, etc). |
 | `~/.local/share/opencode` | Data root: sessions DB, repo clones, logs. |
-| `~/.local/share/opencode/jclaw/lore/` | Your lore library (flat files or `collection/` subfolders; `.md`/`.txt`/`.json`). Worlds saved by `worldsmith` land in a `worlds/` subfolder here. |
+| `~/.local/share/opencode/jclaw/lore/` | Your lore library (flat files or `collection/` subfolders; `.md`/`.txt`/`.json`). Worlds saved by `worldsmith` land in a `worlds/` subfolder here; voice profiles saved via `/voice add` land in a `voices/` subfolder. |
 | `~/.local/state/opencode` | Session state: selected model, theme, mode lock (`kv.json`). |
 
 ---
