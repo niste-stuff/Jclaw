@@ -38,6 +38,7 @@ import { DataProvider } from "./context/data"
 import { LocationProvider } from "./context/location"
 import { LocalProvider, useLocal } from "./context/local"
 import { PermissionProvider } from "./context/permission"
+import { SlopModeProvider } from "./context/slop-mode"
 import { DialogModel } from "./component/dialog-model"
 import { useConnected } from "./component/use-connected"
 import { DialogMcp } from "./component/dialog-mcp"
@@ -288,6 +289,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                           events={input.events}
                                         >
                                           <PermissionProvider>
+                                            <SlopModeProvider>
                                             <ProjectProvider>
                                               <SyncProvider>
                                                 <DataProvider>
@@ -316,6 +318,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                 </DataProvider>
                                               </SyncProvider>
                                             </ProjectProvider>
+                                            </SlopModeProvider>
                                           </PermissionProvider>
                                         </SDKProvider>
                                       </PluginRuntimeProvider>
@@ -832,6 +835,17 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "System",
         run: () => {
           local.permission.toggle()
+          dialog.clear()
+        },
+      },
+      {
+        name: "slop.mode.toggle",
+        title: local.slopMode.enabled ? "Disable slop mode" : "Enable slop mode",
+        slashName: "slop",
+        slashAliases: ["raw"],
+        category: "System",
+        run: () => {
+          local.slopMode.toggle()
           dialog.clear()
         },
       },

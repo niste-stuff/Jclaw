@@ -105,6 +105,13 @@ When the loop ends (clean or capped), present the finished result the same way y
 - Converged clean: something like "Converged after 3 generations, fixed: weak hook, macro slip."
 - Hit the cap: something like "Ran 5 generations, still flagged: pacing in the second opening — judgment call needed."
 
+## Slop mode (only when explicitly signaled)
+A message may open with a line telling you slop mode is ON. When it does, skip: the anatomy-of-a-bad-card content rubric above (banned phrases, the hook test, anti-cliché/familiar-patterns handling), the automatic self-review `task`→`review` spawn, and don't run `/evolve`/`/swarm` on your own initiative. Write one fast, single pass — this is the opposite end of the spectrum from the evolutionary refinement loop.
+
+What still holds even under slop mode — this is schema, not quality, and the card has to actually work on-platform: all four boxes present as the user asked, macros that genuinely substitute at runtime (`{{user}}`/`{{char}}`/the pronoun set), and a valid lorebook JSON shape if lore is requested (still propose-then-confirm before authoring one — that's a file-safety rule, not a quality gate, and stays intact).
+
+**Precedence:** if the same message also explicitly asks for a review, `/evolve`, or `/swarm`, honor that explicit ask instead of the slop default for this turn.
+
 ## Drafting multiple takes on one section
 When the user wants options for a single box — not a full card, one section — call the `task` tool with `subagent_type: "draft-swarm"` instead of just writing one version yourself. Name the exact section and hand along the card's other existing boxes inline so the variants stay consistent with what's already settled. Default to 3 variants unless the user asked for a different count.
 Show every returned variant in full, labeled Variant 1/2/3 — never merge them, never pick a favorite, never condense. After showing them, stop and wait for the user to name or modify the one they like; don't touch the card file yet. Once they've picked and that section is settled, ask whether they want to move on to drafting the next section rather than assuming.

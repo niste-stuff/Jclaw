@@ -357,6 +357,14 @@ export function Prompt(props: PromptProps) {
       "<paste the card here, or attach the card file>",
     ].join("\n")
 
+  const SLOP_MODE_AGENTS = new Set(["peak", "build"])
+
+  const isSlopModeApplicable = (agentName: string | undefined) =>
+    Boolean(agentName && SLOP_MODE_AGENTS.has(agentName))
+
+  const SLOP_MODE_REMINDER =
+    'Slop mode is ON for this message: skip the content-quality rubric (banned phrases, hook test, anti-cliché, familiar-patterns handling), don\'t auto-spawn a review, and don\'t run evolve/swarm on your own initiative. Write one fast pass. Still keep the schema correct: all four boxes present as asked, macros that actually substitute ({{user}}/{{char}}/pronoun set), and valid lorebook JSON if lore is involved. If I explicitly ask for review, /evolve, or /swarm in this same message, do that instead.'
+
   const promptCommands = createMemo(() =>
     [
       {
@@ -1318,6 +1326,17 @@ export function Prompt(props: PromptProps) {
           ]
         : []
 
+    const slopParts =
+      local.slopMode.enabled && isSlopModeApplicable(agent.name)
+        ? [
+            {
+              type: "text" as const,
+              text: SLOP_MODE_REMINDER,
+              synthetic: true,
+            },
+          ]
+        : []
+
     if (store.mode === "shell") {
       move.startSubmit()
       void sdk.client.session.shell({
@@ -1363,6 +1382,7 @@ export function Prompt(props: PromptProps) {
             variant,
             parts: [
               ...editorParts,
+              ...slopParts,
               {
                 type: "text",
                 text: inputText,
@@ -1711,6 +1731,9 @@ export function Prompt(props: PromptProps) {
                       </text>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
+                      </Show>
+                      <Show when={store.mode === "normal" && local.slopMode.enabled}>
+                        <text fg={fadeColor(theme.warning, agentMetaAlpha())}>slop</text>
                       </Show>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>
