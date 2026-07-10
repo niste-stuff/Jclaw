@@ -57,7 +57,14 @@ jobs:
           mkdir -p dist
           cp "target/release/${{ matrix.bin }}" "dist/${{ matrix.artifact_name }}"
           chmod +x "dist/${{ matrix.artifact_name }}"
-          (cd dist && sha256sum "${{ matrix.artifact_name }}" > "${{ matrix.artifact_name }}.sha256")
+          # macOS has no sha256sum (it's shasum -a 256); fall back so the mac leg
+          # doesn't die at packaging after a successful build.
+          cd dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${{ matrix.artifact_name }}" > "${{ matrix.artifact_name }}.sha256"
+          else
+            shasum -a 256 "${{ matrix.artifact_name }}" > "${{ matrix.artifact_name }}.sha256"
+          fi
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -75,3 +82,133 @@ jobs:
             rust/dist/${{ matrix.artifact_name }}
             rust/dist/${{ matrix.artifact_name }}.sha256
           fail_on_unmatched_files: true
+
+  installer-windows:
+    name: windows-installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Build jclaw.exe
+        working-directory: rust
+        run: cargo build --release --bin jclaw
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Stage payload (jclaw.exe + tui source)
+        shell: pwsh
+        run: |
+          $staging = "$env:RUNNER_TEMP\staging"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item "rust\target\release\jclaw.exe" "$staging\jclaw.exe"
+          # Copy the vendored TS source, excluding any local node_modules/.git.
+          robocopy "tui" "$staging\tui" /E /XD node_modules .git /NFL /NDL /NJH /NJS /NP
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)" }
+          $global:LASTEXITCODE = 0
+          "STAGING=$staging" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Bundle pinned bun.exe
+        shell: pwsh
+        run: |
+          $url = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-windows-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\bun.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\bun.zip" -DestinationPath "$env:RUNNER_TEMP\bun" -Force
+          Copy-Item "$env:RUNNER_TEMP\bun\bun-windows-x64\bun.exe" "$env:STAGING\bun.exe"
+
+      - name: Install dependencies (full)
+        shell: pwsh
+        working-directory: ${{ env.STAGING }}\tui
+        # Full install, not --production: opencode declares @opencode-ai/core
+        # (a foundational runtime package imported at startup) as a
+        # devDependency, so --production omits it and serve cannot boot. Ship
+        # the same tree the dev machine runs.
+        run: bun install
+
+      - name: Verify staged tree boots (headless /agent probe)
+        shell: pwsh
+        run: |
+          $bun = "$env:STAGING\bun.exe"
+          $entry = "$env:STAGING\tui\packages\opencode\src\index.ts"
+          $out = "$env:RUNNER_TEMP\serve-out.log"
+          $err = "$env:RUNNER_TEMP\serve-err.log"
+          # Capture the child's stdout/stderr so a boot failure shows the real
+          # error (e.g. a missing module) instead of only a silent timeout.
+          $proc = Start-Process -FilePath $bun `
+            -ArgumentList @("run","--cwd","$env:STAGING\tui\packages\opencode",$entry,"serve","--port","14784","--print-logs") `
+            -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err
+          try {
+            $ok = $false
+            foreach ($i in 1..30) {
+              Start-Sleep -Seconds 2
+              try {
+                $resp = Invoke-WebRequest -Uri "http://127.0.0.1:14784/agent" -UseBasicParsing -TimeoutSec 3
+                if ($resp.Content -match '"peak"' -and $resp.Content -match '"build"') { $ok = $true; break }
+              } catch { }
+            }
+            if (-not $ok) {
+              Write-Host "=== serve stdout ==="; if (Test-Path $out) { Get-Content $out -Tail 60 }
+              Write-Host "=== serve stderr ==="; if (Test-Path $err) { Get-Content $err -Tail 60 }
+              throw "staged tree failed to boot or /agent missing expected agents"
+            }
+            Write-Host "Staged tree booted; /agent lists peak + build."
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+
+      - name: Archive payload + compile installer
+        shell: pwsh
+        run: |
+          # One self-contained archive of the staged payload (jclaw.exe +
+          # bun.exe + tui\ incl. node_modules). The installer ships this single
+          # already-compressed file and extracts it at install time, so Inno
+          # never per-file-compresses the ~100k-file node_modules tree (that
+          # took 40+ min). bsdtar is built into windows-latest.
+          $isrc = "$env:RUNNER_TEMP\isrc"
+          New-Item -ItemType Directory -Force -Path $isrc | Out-Null
+          tar -a -c -f "$isrc\payload.zip" -C "$env:STAGING" jclaw.exe bun.exe tui
+          if ($LASTEXITCODE -ne 0) { throw "tar failed ($LASTEXITCODE)" }
+          Write-Host ("payload.zip: {0:N0} MB" -f ((Get-Item "$isrc\payload.zip").Length / 1MB))
+          choco install innosetup --no-progress -y
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $ver = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF -replace '^refs/tags/v','' } else { '0.0.0-dev' }
+          & $iscc "/DStagingDir=$isrc" "/DAppVer=$ver" "installer\jclaw.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "installer\Output\jclaw-setup.exe" "dist\jclaw-setup.exe"
+          $hash = (Get-FileHash "dist\jclaw-setup.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  jclaw-setup.exe" | Out-File -Encoding ascii "dist\jclaw-setup.exe.sha256"
+          Write-Host ("Installer size: {0:N0} MB" -f ((Get-Item "dist\jclaw-setup.exe").Length / 1MB))
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jclaw-windows-installer
+          path: |
+            dist/jclaw-setup.exe
+            dist/jclaw-setup.exe.sha256
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          files: |
+            dist/jclaw-setup.exe
+            dist/jclaw-setup.exe.sha256
+          fail_on_unmatched_files: true
+          body: |
+            ### jclaw Windows beta
+
+            Download `jclaw-setup.exe`, run it (per-user, no admin), launch **jclaw** from the Start Menu. Windows Terminal recommended over the legacy console.
+
+            **Known beta limitations**
+            - Unsigned — Windows SmartScreen may warn on first run ("More info" → "Run anyway").
+            - The interactive TUI has passed a headless boot check in CI but has not been verified on a real Windows console.
