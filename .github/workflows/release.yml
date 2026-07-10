@@ -142,17 +142,61 @@ jobs:
         # real files instead, so the extracted tree is self-contained.
         run: bun install --linker=hoisted
 
-      - name: Verify staged tree boots (headless /agent probe)
+      - name: Archive payload (symlink-free)
         shell: pwsh
         run: |
-          $bun = "$env:STAGING\bun.exe"
-          $entry = "$env:STAGING\tui\packages\opencode\src\index.ts"
+          # One self-contained archive of the staged payload (jclaw.exe +
+          # bun.exe + tui\ incl. node_modules). The installer ships this single
+          # already-compressed file and extracts it at install time, so Inno
+          # never per-file-compresses the ~100k-file node_modules tree (that
+          # took 40+ min). bsdtar is built into windows-latest.
+          #
+          # -L dereferences symlinks into real files. Even with
+          # --linker=hoisted, bun links *workspace* packages
+          # (node_modules/@opencode-ai/core -> ..\..\packages\core etc.), and
+          # the end user's unprivileged tar.exe cannot recreate links
+          # (PrivilegesRequired=lowest, no admin/Developer Mode) — the target
+          # dirs silently vanish and the app dies at import time
+          # ("Cannot find module '@opencode-ai/core/...'"). The workspace
+          # dependency graph is acyclic, so dereferencing terminates.
+          $isrc = "$env:RUNNER_TEMP\isrc"
+          New-Item -ItemType Directory -Force -Path $isrc | Out-Null
+          tar -a -c -L -f "$isrc\payload.zip" -C "$env:STAGING" jclaw.exe bun.exe tui
+          if ($LASTEXITCODE -ne 0) { throw "tar failed ($LASTEXITCODE)" }
+          # Hard gate: any symlink entry in the archive would break the
+          # unprivileged install, so fail the build rather than ship it.
+          $links = @(tar -tvf "$isrc\payload.zip" | Select-String '^l')
+          if ($links.Count -ne 0) {
+            $links | Select-Object -First 20 | ForEach-Object { Write-Host $_ }
+            throw "payload.zip contains $($links.Count) symlink entries; they cannot be extracted without admin rights"
+          }
+          Write-Host ("payload.zip: {0:N0} MB, 0 symlink entries" -f ((Get-Item "$isrc\payload.zip").Length / 1MB))
+          "ISRC=$isrc" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Verify payload boots after extraction round-trip
+        shell: pwsh
+        run: |
+          # Extract payload.zip the same way the installer does (System32
+          # tar.exe) and boot-check the *extracted* tree, not the staged one —
+          # this validates the exact artifact users receive, catching anything
+          # lost in the archive round-trip (symlinks, long paths, ...).
+          $rt = "$env:RUNNER_TEMP\roundtrip"
+          New-Item -ItemType Directory -Force -Path $rt | Out-Null
+          & "$env:SystemRoot\System32\tar.exe" -xf "$env:ISRC\payload.zip" -C $rt
+          if ($LASTEXITCODE -ne 0) { throw "round-trip extraction failed ($LASTEXITCODE)" }
+          $rp = @(Get-ChildItem $rt -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
+          if ($rp.Count -ne 0) {
+            $rp | Select-Object -First 20 | ForEach-Object { Write-Host $_.FullName }
+            throw "extracted tree contains $($rp.Count) reparse points"
+          }
+          $bun = "$rt\bun.exe"
+          $entry = "$rt\tui\packages\opencode\src\index.ts"
           $out = "$env:RUNNER_TEMP\serve-out.log"
           $err = "$env:RUNNER_TEMP\serve-err.log"
           # Capture the child's stdout/stderr so a boot failure shows the real
           # error (e.g. a missing module) instead of only a silent timeout.
           $proc = Start-Process -FilePath $bun `
-            -ArgumentList @("run","--cwd","$env:STAGING\tui\packages\opencode",$entry,"serve","--port","14784","--print-logs") `
+            -ArgumentList @("run","--cwd","$rt\tui\packages\opencode",$entry,"serve","--port","14784","--print-logs") `
             -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err
           try {
             $ok = $false
@@ -166,26 +210,17 @@ jobs:
             if (-not $ok) {
               Write-Host "=== serve stdout ==="; if (Test-Path $out) { Get-Content $out -Tail 60 }
               Write-Host "=== serve stderr ==="; if (Test-Path $err) { Get-Content $err -Tail 60 }
-              throw "staged tree failed to boot or /agent missing expected agents"
+              throw "round-tripped tree failed to boot or /agent missing expected agents"
             }
-            Write-Host "Staged tree booted; /agent lists peak + build."
+            Write-Host "Round-tripped tree booted; /agent lists peak + build."
           } finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
 
-      - name: Archive payload + compile installer
+      - name: Compile installer
         shell: pwsh
         run: |
-          # One self-contained archive of the staged payload (jclaw.exe +
-          # bun.exe + tui\ incl. node_modules). The installer ships this single
-          # already-compressed file and extracts it at install time, so Inno
-          # never per-file-compresses the ~100k-file node_modules tree (that
-          # took 40+ min). bsdtar is built into windows-latest.
-          $isrc = "$env:RUNNER_TEMP\isrc"
-          New-Item -ItemType Directory -Force -Path $isrc | Out-Null
-          tar -a -c -f "$isrc\payload.zip" -C "$env:STAGING" jclaw.exe bun.exe tui
-          if ($LASTEXITCODE -ne 0) { throw "tar failed ($LASTEXITCODE)" }
-          Write-Host ("payload.zip: {0:N0} MB" -f ((Get-Item "$isrc\payload.zip").Length / 1MB))
+          $isrc = $env:ISRC
           choco install innosetup --no-progress -y
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           $ver = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF -replace '^refs/tags/v','' } else { '0.0.0-dev' }
