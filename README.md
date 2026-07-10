@@ -193,7 +193,6 @@ Jclaw/
 │   │   ├── llm/                 Model/provider plumbing
 │   │   └── ui/                  Shared web-UI components (used by a separate
 │   │                            web surface, not the TUI)
-│   ├── HANDOFF.md              Session-by-session build log for this fork
 │   │                            (not shipped/user-facing — dev history only)
 │   └── patches/                 Patched-dependency overrides for `bun install`
 │
@@ -205,9 +204,7 @@ Jclaw/
 ├── tests/
 │   └── test_pre_push_hook_contract.py   Validates `.github/hooks/pre-push`
 │
-├── docs/                        Misc reference docs (e.g. superpowers specs)
 ├── README.md                    This file
-├── CLAUDE.md                    Repo instructions for Claude Code
 └── LICENSE                      MIT (upstream claw-code + opencode attribution)
 ```
 
