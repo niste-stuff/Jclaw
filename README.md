@@ -671,6 +671,7 @@ the Rust binary finds Bun/the TUI, see `rust/crates/rusty-claude-cli/src/tui.rs`
 | `JCLAW_TUI_DIR` | Absolute path to the vendored `tui/` directory, if not auto-detected. |
 | `JCLAW_BINDIR` | Where `scripts/install-jclaw.sh` installs the launcher (default `~/.local/bin`). |
 | `JCLAW_DOCS_URL` | Overrides what `/docs` opens (defaults to this README on disk). |
+| `JCLAW_ENABLE_UPSTREAM_UPGRADE` | Re-enables upstream opencode's upgrade flow (disabled in jclaw: it would install the upstream `opencode-ai` package, not jclaw — upgrade via this repo's Releases instead). |
 
 ---
 
