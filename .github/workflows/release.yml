@@ -130,7 +130,17 @@ jobs:
         # (a foundational runtime package imported at startup) as a
         # devDependency, so --production omits it and serve cannot boot. Ship
         # the same tree the dev machine runs.
-        run: bun install
+        #
+        # --linker=hoisted: Bun's default "isolated" layout symlinks each
+        # workspace package's node_modules/<pkg> back to a shared
+        # node_modules/.bun/<pkg>@<hash> store. This CI runner has the
+        # privilege to create those symlinks, but the Inno installer runs
+        # PrivilegesRequired=lowest (no admin, no Developer Mode) on the end
+        # user's machine, so tar.exe can't recreate them on extract —
+        # @opentui/solid (and anything else hoisted into .bun) silently
+        # disappears, breaking the bunfig preload. Hoisted linking installs
+        # real files instead, so the extracted tree is self-contained.
+        run: bun install --linker=hoisted
 
       - name: Verify staged tree boots (headless /agent probe)
         shell: pwsh
