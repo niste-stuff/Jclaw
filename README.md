@@ -118,6 +118,38 @@ cd rust && cargo run --bin claw -- tui
 **Prerequisites:** a Rust toolchain, Bun (`~/.bun/bin/bun`), and `bun install`
 run once inside `tui/` to materialize vendored dependencies.
 
+### Windows (beta)
+
+A one-click Windows installer is built by CI on the `windows-one-click-installer`
+branch (not yet merged to `main`). End users need **no terminal and no
+toolchain**:
+
+1. Download `jclaw-setup.exe` from the repo's Releases page (e.g. the
+   `v0.1.0-beta.1` pre-release).
+2. Double-click it. Windows SmartScreen may warn (the installer is unsigned) —
+   **More info → Run anyway**.
+3. It installs per-user to `%LOCALAPPDATA%\Programs\jclaw` (no admin) and adds a
+   Start Menu shortcut. Launch **jclaw** from there; the TUI opens in a console
+   window (Windows Terminal recommended over the legacy console).
+
+The installer bundles everything — the launcher, Bun, and the vendored front end
+— and extracts it at install time, so nothing is downloaded on first run. It is
+a ~313 MB download.
+
+**How it's built:** the CI `installer-windows` job (in
+`.github/workflows/release.yml`) does a full `bun install`, gates on a headless
+boot check, tars the payload into one archive, and compiles
+`installer/jclaw.iss` (Inno Setup) around it — the installer ships that single
+archive and extracts it with Windows' built-in `tar`, which keeps the compile
+fast. Pushing a `v*` tag builds and attaches `jclaw-setup.exe` to a pre-release
+automatically. This is beta: the interactive TUI has passed a headless boot
+check in CI but is still being validated on real Windows consoles.
+
+**Building from source on Windows** (dev, no installer) works too — install Rust
++ Bun, `bun install` in `tui/`, then `cargo run --release --bin jclaw` from
+`rust/`. Use the `windows-one-click-installer` branch: it carries the `locate_bun`
+fix that lets `jclaw` find `bun.exe` on native Windows.
+
 ---
 
 ## 2. File structure
