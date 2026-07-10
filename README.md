@@ -27,7 +27,18 @@ and many sessions:
   wrong. jclaw's agents carry the schema explicitly in-prompt, plus a
   reference lorebook example (`agent/prompt/reference/lorebook-example.json`)
   checked against real, currently-working JanitorAI exports — not recalled
-  from memory.
+  from memory. The rubric itself is cross-checked against multiple sources,
+  not one person's read of the platform: the user's own reviewed card/
+  lorebook corpus plus four external botmaking guides (NicholasCS's,
+  absolutetrash's, `rentry.org/botcreationguide`, `rentry.org/letsmakeabot`),
+  reconciled point-by-point rather than merged blindly — points where guides
+  disagreed with each other or with the existing rubric were resolved
+  explicitly, not averaged. Every rule that landed was then live-tested
+  against real `jclaw` runs with deliberately flawed disposable test cards,
+  cross-checked against the session database rather than trusting the chat
+  transcript — one rule that looked fine on paper turned out not to fire at
+  all until it was rewritten with an explicit mechanical trigger, which is
+  exactly the kind of gap a prompt alone won't catch itself.
 - **Separation of authoring and critique.** `review` and `review-swarm` run
   as genuinely separate subagent calls, not the same conversation asking
   itself "is this good?" A model grading its own in-context output tends to
@@ -704,6 +715,11 @@ redacts file paths/contents/URLs as `[redacted:kind:id]` before you share it.
 - `--auto`/`--yolo`/`--dangerously-skip-permissions` and
   `OPENCODE_DISABLE_PROJECT_CONFIG` are sharp tools — they affect a shared
   config that also drives your real opencode setup if you use both.
+- `peak`/`build`/`review*`'s card-authoring rules are cross-checked against
+  community botmaking guides, not just one person's read of the platform —
+  see NicholasCS's, absolutetrash's, and the `rentry.org/botcreationguide` /
+  `letsmakeabot` guides. Live-verified against real `jclaw` runs (disposable
+  test cards, session-DB-checked) before landing in the prompts.
 
 ---
 
