@@ -12,7 +12,7 @@ it, and how it works under the hood.
 
 ---
 
-## 0. Why jclaw over a good system prompt
+## 0. Why use jclaw?
 
 You can get most of the way to "know the schema, avoid clichés, use
 `{{user}}`/`{{char}}` macros correctly" by pasting an advanced system prompt
