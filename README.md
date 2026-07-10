@@ -338,6 +338,19 @@ Type `/` in the composer, or open the command palette with `ctrl+p`.
 | `/animations` | Toggle UI animations. |
 | `/pastesummary` | Toggle paste-summary behavior. |
 | `/autoapprove` | Set the permission auto-approve mode (alias `/yolo`). |
+| `/slop` | Toggle slop mode (alias `/raw`) — see [Slop mode](#slop-mode-fast-disposable-drafts) below. |
+
+### Slop mode: fast, disposable drafts
+
+`/slop` is a sticky toggle, scoped to `peak`/`build` only, for when you want a fast throwaway
+draft instead of the usual quality bar. While it's on (a `slop` label shows next to the agent
+name in the composer footer), `peak`/`build` skip the anatomy-of-a-bad-card content rubric,
+the automatic self-review spawn, and won't run `/evolve`/`/swarm` on their own. What they still
+enforce is the **schema** — the four boxes, macros that actually substitute, valid lorebook
+JSON if lore is involved — so the card still works on-platform, it just isn't polished. If you
+explicitly ask for a review, `/evolve`, or `/swarm` in the same message, that request wins over
+the slop default. The toggle resets to off every time you restart jclaw, so it can't stay on
+without you noticing.
 
 ---
 
