@@ -253,6 +253,7 @@ Type `/` in the composer, or open the command palette with `ctrl+p`.
 | `/contradictions` | `/contradict` | Scans the current card for internal inconsistencies. Stays on the current agent — a manual, on-demand deep-dive. |
 | `/swarm` | `/deepreview` | Fans the current draft out to whichever of `review-swarm`'s 4 lenses apply and shows the merged findings in full (not condensed). |
 | `/takes` | `/draftswarm` | Fans out 3 distinct-angle takes on a single card section (not the whole card) via `draft-swarm` and shows them for you to pick or modify — stays on the current agent. |
+| `/evolve` | `/refine` | Loops draft → review → auto-fix for up to N generations (default 3, e.g. `/evolve 5`) — fully unattended, ends with one summary line. Stays on the current agent. |
 | `/lorebook` | `/worldinfo` | Prefills a propose-then-confirm lorebook-authoring prompt for the current card, switches to `peak`. |
 | `/lore` | — | Opens a picker over your lore library, then hands the picked file's path to `peak` to build a card grounded in it. |
 | `/lore add` | `/addlore` | Prefills a save-into-the-lore-library prompt on `build`. |

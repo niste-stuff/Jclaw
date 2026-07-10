@@ -338,6 +338,24 @@ export function Prompt(props: PromptProps) {
     input.gotoBufferEnd()
   }
 
+  const DEFAULT_EVOLVE_GENERATIONS = 3
+  const MAX_EVOLVE_GENERATIONS = 10
+
+  const resolveEvolveGenerations = (raw?: string) => {
+    const n = raw ? Number.parseInt(raw, 10) : NaN
+    if (!Number.isFinite(n) || n < 1) return DEFAULT_EVOLVE_GENERATIONS
+    return Math.min(n, MAX_EVOLVE_GENERATIONS)
+  }
+
+  const buildEvolvePrompt = (generations: number) =>
+    [
+      `Run the evolutionary refinement loop on this draft: repeat draft → self-review (call the task tool with subagent_type: "review") → fix → re-review for up to ${generations} generation${generations === 1 ? "" : "s"}, stopping early the instant a review pass comes back clean. Do this fully unattended — no back-and-forth with me mid-loop; use your own judgment on anything ambiguous and keep going.`,
+      "",
+      "When the loop ends, show me the finished result plus ONE short summary line — how many generations ran and what got fixed, or what's still flagged as a judgment call. Never a per-generation history dump.",
+      "",
+      "<paste the card here, or attach the card file>",
+    ].join("\n")
+
   const promptCommands = createMemo(() =>
     [
       {
@@ -628,6 +646,17 @@ export function Prompt(props: PromptProps) {
               "<paste the card here, or attach the card file>",
             ].join("\n"),
           )
+        },
+      },
+      {
+        title: "Evolutionary refinement loop",
+        desc: "Loop draft → review → auto-fix for up to N generations, unattended (default 3)",
+        name: "card.evolve",
+        category: "Cards",
+        slashName: "evolve",
+        slashAliases: ["refine"],
+        run: () => {
+          fillPrompt(buildEvolvePrompt(DEFAULT_EVOLVE_GENERATIONS))
         },
       },
       {
@@ -1144,6 +1173,11 @@ export function Prompt(props: PromptProps) {
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
       return true
+    }
+    const evolveMatch = trimmed.match(/^\/(?:evolve|refine)(?:\s+(\d+))?$/i)
+    if (evolveMatch) {
+      fillPrompt(buildEvolvePrompt(resolveEvolveGenerations(evolveMatch[1])))
+      return false
     }
     const selectedModel = local.model.current()
     if (!selectedModel) {
