@@ -35,6 +35,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 UninstallDisplayName=jclaw {#AppVer}
 UninstallDisplayIcon={app}\jclaw.exe
+; Lets Explorer/new consoles pick up the PATH change made in [Code] below
+; without requiring a reboot.
+ChangesEnvironment=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
@@ -60,3 +63,60 @@ Filename: "{app}\jclaw.exe"; Description: "Launch jclaw"; Flags: nowait postinst
 ; The runtime under {app} is extracted by tar, not tracked by [Files], so the
 ; uninstaller would not remove it automatically — clear the whole app dir.
 Type: filesandordirs; Name: "{app}"
+
+[Code]
+// Adds/removes {app} from the per-user PATH (HKCU\Environment) so `jclaw`
+// resolves in a terminal, not just the Start Menu shortcut. Per-user because
+// PrivilegesRequired=lowest above means we never touch HKLM.
+const
+  EnvironmentKey = 'Environment';
+
+procedure EnvAddPath(Path: string);
+var
+  Paths: string;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Paths) then
+    Paths := '';
+
+  { Already present: nothing to do }
+  if Pos(';' + Uppercase(Path) + ';', ';' + Uppercase(Paths) + ';') > 0 then
+    exit;
+
+  if Length(Paths) > 0 then
+    Paths := Paths + ';' + Path
+  else
+    Paths := Path;
+
+  if not RegWriteStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Paths) then
+    Log(Format('EnvAddPath: failed to write PATH (%s)', [Path]));
+end;
+
+procedure EnvRemovePath(Path: string);
+var
+  Paths: string;
+  P: Integer;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Paths) then
+    exit;
+
+  P := Pos(';' + Uppercase(Path) + ';', ';' + Uppercase(Paths) + ';');
+  if P = 0 then
+    exit;
+
+  Delete(Paths, P - 1, Length(Path) + 1);
+
+  if not RegWriteStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Paths) then
+    Log(Format('EnvRemovePath: failed to write PATH (%s)', [Path]));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    EnvAddPath(ExpandConstant('{app}'));
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    EnvRemovePath(ExpandConstant('{app}'));
+end;

@@ -21,3 +21,6 @@ docs/superpowers/specs/
 /.claude.json
 /.claw.json
 /CLAUDE.md
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store

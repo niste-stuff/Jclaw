@@ -128,9 +128,10 @@ toolchain**:
    `v0.1.0-beta.1` pre-release).
 2. Double-click it. Windows SmartScreen may warn (the installer is unsigned) —
    **More info → Run anyway**.
-3. It installs per-user to `%LOCALAPPDATA%\Programs\jclaw` (no admin) and adds a
-   Start Menu shortcut. Launch **jclaw** from there; the TUI opens in a console
-   window (Windows Terminal recommended over the legacy console).
+3. It installs per-user to `%LOCALAPPDATA%\Programs\jclaw` (no admin), adds a
+   Start Menu shortcut, and puts that folder on your user `PATH`. Launch
+   **jclaw** from the Start Menu, or open a *new* terminal window and run
+   `jclaw` directly (Windows Terminal recommended over the legacy console).
 
 The installer bundles everything — the launcher, Bun, and the vendored front end
 — and extracts it at install time, so nothing is downloaded on first run. It is
