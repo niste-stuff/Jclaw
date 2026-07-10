@@ -76,6 +76,11 @@ var
 begin
   WizardForm.StatusLabel.Caption := 'Extracting bundled runtime (one-time)...';
   ForceDirectories(ExpandConstant('{app}'));
+  { Upgrade installs: extracting over a previous version's tui\ tree leaves
+    stale files behind (removed packages, old layouts) that can shadow the
+    fresh ones. The tree is fully regenerated from payload.zip, so drop it. }
+  if DirExists(ExpandConstant('{app}\tui')) then
+    DelTree(ExpandConstant('{app}\tui'), True, True, True);
   if not Exec(ExpandConstant('{sys}\tar.exe'),
       ExpandConstant('-xf "{tmp}\payload.zip" -C "{app}"'),
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then

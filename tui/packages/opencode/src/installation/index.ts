@@ -263,6 +263,16 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         return data.tag_name.replace(/^v/, "")
       }, Effect.orDie),
       upgrade: Effect.fn("Installation.upgrade")(function* (m: Method, target: string) {
+        // jclaw: every branch below installs the upstream opencode/opencode-ai
+        // package, which is not what this fork ships as. Refuse with a pointer
+        // to jclaw's own releases; JCLAW_ENABLE_UPSTREAM_UPGRADE restores the
+        // upstream behavior if someone really wants it.
+        if (!process.env["JCLAW_ENABLE_UPSTREAM_UPGRADE"])
+          return yield* new UpgradeFailedError({
+            stderr:
+              "jclaw is upgraded via its own releases (https://github.com/niste-stuff/Jclaw/releases), " +
+              "not upstream opencode's install channels.",
+          })
         let upgradeResult: { code: number; stdout: string; stderr: string } | undefined
         switch (m) {
           case "curl":

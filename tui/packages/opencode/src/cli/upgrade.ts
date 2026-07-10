@@ -6,6 +6,12 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { GlobalBus } from "@/bus/global"
 
 export async function upgrade() {
+  // jclaw: this fork is not distributed through upstream opencode's channels.
+  // The upstream flow probes every package manager on each TUI boot, compares
+  // against upstream opencode releases (jclaw's version is "local", so the
+  // comparison is meaningless), and on a match would install the upstream
+  // opencode-ai package. Upgrades happen via jclaw's own releases instead.
+  if (!process.env["JCLAW_ENABLE_UPSTREAM_UPGRADE"]) return
   const config = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobal()))
   if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return
   const method = await Installation.method()

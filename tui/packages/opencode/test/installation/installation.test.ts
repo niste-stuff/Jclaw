@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { beforeAll, describe, expect } from "bun:test"
 import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
@@ -183,6 +183,27 @@ describe("installation", () => {
   })
 
   describe("upgrade", () => {
+    // jclaw refuses upstream upgrades unless JCLAW_ENABLE_UPSTREAM_UPGRADE is
+    // set (every upstream branch installs the opencode-ai package, which is
+    // not how this fork is distributed). Opt in here so the upstream-flow
+    // tests below still exercise their branches; the refusal test unsets and
+    // restores the flag around its assertion.
+    beforeAll(() => {
+      process.env["JCLAW_ENABLE_UPSTREAM_UPGRADE"] = "1"
+    })
+
+    testEffect(testLayer(() => jsonResponse({}))).effect(
+      "refuses upstream upgrade channels unless explicitly enabled",
+      () =>
+        Effect.gen(function* () {
+          delete process.env["JCLAW_ENABLE_UPSTREAM_UPGRADE"]
+          const error = yield* Effect.flip(Installation.use.upgrade("npm", "9.9.9"))
+          expect(error).toBeInstanceOf(Installation.UpgradeFailedError)
+          expect(error.stderr).toContain("jclaw")
+          process.env["JCLAW_ENABLE_UPSTREAM_UPGRADE"] = "1"
+        }),
+    )
+
     testEffect(
       testLayer(
         () => jsonResponse({}),
