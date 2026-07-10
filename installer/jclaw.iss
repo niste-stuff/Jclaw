@@ -22,8 +22,12 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=Output
 OutputBaseFilename=jclaw-setup
-Compression=lzma2/max
-SolidCompression=yes
+; Non-solid, normal compression: the bundled node_modules is tens of
+; thousands of small files (incl. nested duplicate dev tooling), and
+; solid lzma2/max spends 30+ min compressing them. Non-solid trades a
+; slightly larger installer for a compile that finishes in minutes.
+Compression=lzma2/normal
+SolidCompression=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
