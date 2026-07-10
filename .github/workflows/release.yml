@@ -156,30 +156,37 @@ jobs:
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
 
-      - name: Package portable zip
+      - name: Archive payload + compile installer
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $zip = "dist\jclaw-windows-portable.zip"
-          # bsdtar (built into windows-latest) is far faster than Inno's
-          # per-file lzma on the ~100k-file node_modules tree. -a picks the zip
-          # format from the extension. bun on Windows materializes real files
-          # (copies/junctions), so the archive is self-contained: extract and
-          # run jclaw.exe next to bun.exe + tui/ — locate_bun/locate_tui_dir
-          # resolve both from the exe's own directory.
-          tar -a -c -f $zip -C "$env:STAGING" .
+          # One self-contained archive of the staged payload (jclaw.exe +
+          # bun.exe + tui\ incl. node_modules). The installer ships this single
+          # already-compressed file and extracts it at install time, so Inno
+          # never per-file-compresses the ~100k-file node_modules tree (that
+          # took 40+ min). bsdtar is built into windows-latest.
+          $isrc = "$env:RUNNER_TEMP\isrc"
+          New-Item -ItemType Directory -Force -Path $isrc | Out-Null
+          tar -a -c -f "$isrc\payload.zip" -C "$env:STAGING" jclaw.exe bun.exe tui
           if ($LASTEXITCODE -ne 0) { throw "tar failed ($LASTEXITCODE)" }
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  jclaw-windows-portable.zip" | Out-File -Encoding ascii "$zip.sha256"
-          Write-Host ("Portable zip size: {0:N0} MB" -f ((Get-Item $zip).Length / 1MB))
+          Write-Host ("payload.zip: {0:N0} MB" -f ((Get-Item "$isrc\payload.zip").Length / 1MB))
+          choco install innosetup --no-progress -y
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $ver = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF -replace '^refs/tags/v','' } else { '0.0.0-dev' }
+          & $iscc "/DStagingDir=$isrc" "/DAppVer=$ver" "installer\jclaw.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "installer\Output\jclaw-setup.exe" "dist\jclaw-setup.exe"
+          $hash = (Get-FileHash "dist\jclaw-setup.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  jclaw-setup.exe" | Out-File -Encoding ascii "dist\jclaw-setup.exe.sha256"
+          Write-Host ("Installer size: {0:N0} MB" -f ((Get-Item "dist\jclaw-setup.exe").Length / 1MB))
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jclaw-windows-portable
+          name: jclaw-windows-installer
           path: |
-            dist/jclaw-windows-portable.zip
-            dist/jclaw-windows-portable.zip.sha256
+            dist/jclaw-setup.exe
+            dist/jclaw-setup.exe.sha256
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')
@@ -187,13 +194,13 @@ jobs:
         with:
           prerelease: true
           files: |
-            dist/jclaw-windows-portable.zip
-            dist/jclaw-windows-portable.zip.sha256
+            dist/jclaw-setup.exe
+            dist/jclaw-setup.exe.sha256
           fail_on_unmatched_files: true
           body: |
-            ### jclaw Windows beta (portable)
+            ### jclaw Windows beta
 
-            First Windows build. Download `jclaw-windows-portable.zip`, extract it anywhere, and run `jclaw.exe` (no install, no admin). Windows Terminal recommended over the legacy console.
+            Download `jclaw-setup.exe`, run it (per-user, no admin), launch **jclaw** from the Start Menu. Windows Terminal recommended over the legacy console.
 
             **Known beta limitations**
             - Unsigned — Windows SmartScreen may warn on first run ("More info" → "Run anyway").
