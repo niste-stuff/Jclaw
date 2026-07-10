@@ -261,4 +261,3 @@ jobs:
 
             **Known beta limitations**
             - Windows installer is unsigned — SmartScreen may warn on first run ("More info" → "Run anyway").
-            - The interactive TUI has passed a headless boot check in CI but has not been verified on a real Windows console.

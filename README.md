@@ -144,8 +144,9 @@ check of the archive *after* an extraction round-trip, and compiles
 `installer/jclaw.iss` (Inno Setup) around it — the installer ships that single
 archive and extracts it with Windows' built-in `tar`, which keeps the compile
 fast. Pushing a `v*` tag builds and attaches `jclaw-setup.exe` to a pre-release
-automatically. This is beta: the interactive TUI has passed a headless boot
-check in CI but is still being validated on real Windows consoles.
+automatically. This is beta, but the full path — install, `jclaw` from a fresh
+terminal, and the interactive TUI — has been verified on a real Windows machine
+(as of `v0.1.0-beta.5`).
 
 **Building from source on Windows** (dev, no installer) works too — install Rust
 + Bun, `bun install` in `tui/`, then `cargo run --release --bin jclaw` from
