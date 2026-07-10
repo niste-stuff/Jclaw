@@ -199,16 +199,21 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: jclaw ${{ github.ref_name }}
           prerelease: true
           files: |
             dist/jclaw-setup.exe
             dist/jclaw-setup.exe.sha256
           fail_on_unmatched_files: true
           body: |
-            ### jclaw Windows beta
+            ### jclaw ${{ github.ref_name }}
 
-            Download `jclaw-setup.exe`, run it (per-user, no admin), launch **jclaw** from the Start Menu. Windows Terminal recommended over the legacy console.
+            Prebuilt binaries for Linux (x64), macOS (arm64), and Windows (x64), plus a one-click Windows installer.
+
+            **Windows (one-click):** download `jclaw-setup.exe`, run it (per-user, no admin) — installs to `%LOCALAPPDATA%\Programs\jclaw`, adds a Start Menu shortcut, and puts `jclaw` on your PATH. Launch from the Start Menu or a new terminal.
+
+            **Linux / macOS:** download `claw-linux-x64` / `claw-macos-arm64`, `chmod +x`, and run — same prerequisites as building from source (Bun + `bun install` in `tui/`).
 
             **Known beta limitations**
-            - Unsigned — Windows SmartScreen may warn on first run ("More info" → "Run anyway").
+            - Windows installer is unsigned — SmartScreen may warn on first run ("More info" → "Run anyway").
             - The interactive TUI has passed a headless boot check in CI but has not been verified on a real Windows console.
