@@ -12,6 +12,7 @@
 //! - `JCLAW_BUN` — absolute path to the `bun` executable.
 
 use std::error::Error;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -65,22 +66,51 @@ pub fn run_tui(args: &[String]) -> Result<(), Box<dyn Error>> {
     exec_replacing(command, &bun)
 }
 
-/// Locate the `bun` executable: explicit override, then the default install
-/// location, then `PATH`.
-fn locate_bun() -> Result<PathBuf, Box<dyn Error>> {
-    if let Some(path) = std::env::var_os("JCLAW_BUN") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
+/// Ordered, most-specific-first list of non-`PATH` places to look for Bun.
+/// Pure and platform-neutral (takes env values + the running exe's directory)
+/// so it can be unit-tested anywhere. The binary name is `bun` on Unix and
+/// `bun.exe` on Windows via `EXE_SUFFIX`.
+fn bun_candidates(
+    jclaw_bun: Option<&OsStr>,
+    exe_dir: Option<&Path>,
+    home: Option<&OsStr>,
+    user_profile: Option<&OsStr>,
+) -> Vec<PathBuf> {
+    let bun_name = format!("bun{}", std::env::consts::EXE_SUFFIX);
+    let mut out = Vec::new();
+    if let Some(explicit) = jclaw_bun {
+        out.push(PathBuf::from(explicit));
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let candidate = PathBuf::from(&home).join(".bun/bin/bun");
+    // A Bun bundled next to jclaw's own binary (the installed layout).
+    if let Some(dir) = exe_dir {
+        out.push(dir.join(&bun_name));
+    }
+    // A user's own Bun install: `$HOME/.bun/bin/bun` (Unix) or
+    // `%USERPROFILE%\.bun\bin\bun.exe` (Windows).
+    for base in [home, user_profile].into_iter().flatten() {
+        out.push(PathBuf::from(base).join(".bun").join("bin").join(&bun_name));
+    }
+    out
+}
+
+/// Locate the `bun` executable: explicit override, then a Bun bundled next to
+/// jclaw, then the user's own install, then `PATH`.
+fn locate_bun() -> Result<PathBuf, Box<dyn Error>> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    let candidates = bun_candidates(
+        std::env::var_os("JCLAW_BUN").as_deref(),
+        exe_dir.as_deref(),
+        std::env::var_os("HOME").as_deref(),
+        std::env::var_os("USERPROFILE").as_deref(),
+    );
+    for candidate in candidates {
         if candidate.is_file() {
             return Ok(candidate);
         }
     }
-    if let Some(found) = which_in_path("bun") {
+    if let Some(found) = which_in_path(&format!("bun{}", std::env::consts::EXE_SUFFIX)) {
         return Ok(found);
     }
     Err("`claw tui` needs Bun, which was not found.\nInstall it with:  curl -fsSL https://bun.sh/install | bash\n(or set JCLAW_BUN to the bun binary)."
@@ -165,4 +195,61 @@ fn exec_replacing(mut command: Command, bun: &Path) -> Result<(), Box<dyn Error>
         .status()
         .map_err(|error| format!("failed to launch the TUI via {}: {error}", bun.display()))?;
     std::process::exit(status.code().unwrap_or(1));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bun_candidates;
+    use std::ffi::OsStr;
+    use std::path::{Path, PathBuf};
+
+    fn bun_name() -> String {
+        format!("bun{}", std::env::consts::EXE_SUFFIX)
+    }
+
+    #[test]
+    fn jclaw_bun_override_is_first() {
+        let got = bun_candidates(
+            Some(OsStr::new("/opt/custom/bun")),
+            Some(Path::new("/install/jclaw")),
+            Some(OsStr::new("/home/u")),
+            None,
+        );
+        assert_eq!(got.first(), Some(&PathBuf::from("/opt/custom/bun")));
+    }
+
+    #[test]
+    fn bundled_sibling_probed_before_home() {
+        let got = bun_candidates(
+            None,
+            Some(Path::new("/install/jclaw")),
+            Some(OsStr::new("/home/u")),
+            None,
+        );
+        assert_eq!(got[0], PathBuf::from("/install/jclaw").join(bun_name()));
+        assert_eq!(
+            got[1],
+            PathBuf::from("/home/u")
+                .join(".bun")
+                .join("bin")
+                .join(bun_name())
+        );
+    }
+
+    #[test]
+    fn user_profile_used_when_home_absent() {
+        let got = bun_candidates(None, None, None, Some(OsStr::new("C:\\Users\\u")));
+        assert_eq!(
+            got,
+            vec![PathBuf::from("C:\\Users\\u")
+                .join(".bun")
+                .join("bin")
+                .join(bun_name())]
+        );
+    }
+
+    #[test]
+    fn empty_when_nothing_available() {
+        assert!(bun_candidates(None, None, None, None).is_empty());
+    }
 }
