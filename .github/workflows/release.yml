@@ -116,19 +116,27 @@ jobs:
           Expand-Archive -Path "$env:RUNNER_TEMP\bun.zip" -DestinationPath "$env:RUNNER_TEMP\bun" -Force
           Copy-Item "$env:RUNNER_TEMP\bun\bun-windows-x64\bun.exe" "$env:STAGING\bun.exe"
 
-      - name: Prune install (production deps only)
+      - name: Install dependencies (full)
         shell: pwsh
         working-directory: ${{ env.STAGING }}\tui
-        run: bun install --production
+        # Full install, not --production: opencode declares @opencode-ai/core
+        # (a foundational runtime package imported at startup) as a
+        # devDependency, so --production omits it and serve cannot boot. Ship
+        # the same tree the dev machine runs.
+        run: bun install
 
-      - name: Verify pruned tree boots (headless /agent probe)
+      - name: Verify staged tree boots (headless /agent probe)
         shell: pwsh
         run: |
           $bun = "$env:STAGING\bun.exe"
           $entry = "$env:STAGING\tui\packages\opencode\src\index.ts"
+          $out = "$env:RUNNER_TEMP\serve-out.log"
+          $err = "$env:RUNNER_TEMP\serve-err.log"
+          # Capture the child's stdout/stderr so a boot failure shows the real
+          # error (e.g. a missing module) instead of only a silent timeout.
           $proc = Start-Process -FilePath $bun `
             -ArgumentList @("run","--cwd","$env:STAGING\tui\packages\opencode",$entry,"serve","--port","14784","--print-logs") `
-            -PassThru -WindowStyle Hidden
+            -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err
           try {
             $ok = $false
             foreach ($i in 1..30) {
@@ -138,8 +146,12 @@ jobs:
                 if ($resp.Content -match '"peak"' -and $resp.Content -match '"build"') { $ok = $true; break }
               } catch { }
             }
-            if (-not $ok) { throw "pruned tree failed to boot or /agent missing expected agents" }
-            Write-Host "Pruned tree booted; /agent lists peak + build."
+            if (-not $ok) {
+              Write-Host "=== serve stdout ==="; if (Test-Path $out) { Get-Content $out -Tail 60 }
+              Write-Host "=== serve stderr ==="; if (Test-Path $err) { Get-Content $err -Tail 60 }
+              throw "staged tree failed to boot or /agent missing expected agents"
+            }
+            Write-Host "Staged tree booted; /agent lists peak + build."
           } finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
