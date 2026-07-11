@@ -23,6 +23,11 @@ import PROMPT_REVIEW_LORE from "./prompt/review-lore.txt"
 import PROMPT_REVIEW_MACROS from "./prompt/review-macros.txt"
 import PROMPT_REVIEW_STRUCTURE from "./prompt/review-structure.txt"
 import PROMPT_REVIEW_SWARM from "./prompt/review-swarm.txt"
+import PROMPT_FORENSICS_ENTROPY from "./prompt/forensics-entropy.txt"
+import PROMPT_FORENSICS_FINGERPRINT from "./prompt/forensics-fingerprint.txt"
+import PROMPT_FORENSICS_GHOST from "./prompt/forensics-ghost.txt"
+import PROMPT_FORENSICS_BIAS from "./prompt/forensics-bias.txt"
+import PROMPT_FORENSICS_SWARM from "./prompt/forensics-swarm.txt"
 import PROMPT_SECTION_DRAFT from "./prompt/section-draft.txt"
 import PROMPT_DRAFT_SWARM from "./prompt/draft-swarm.txt"
 import PROMPT_VOICE_PROFILER from "./prompt/voice-profiler.txt"
@@ -387,6 +392,115 @@ const layer = Layer.effect(
                   "review-lore": "allow",
                   "review-macros": "allow",
                   "review-structure": "allow",
+                },
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          "forensics-entropy": {
+            name: "forensics-entropy",
+            description: `Forensics-swarm lens: statistical entropy signature (Shannon entropy, sentence-length variance, repetition rate, vocabulary richness). Findings only, no rewrites.`,
+            prompt: PROMPT_FORENSICS_ENTROPY,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                text_entropy: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
+          "forensics-fingerprint": {
+            name: "forensics-fingerprint",
+            description: `Forensics-swarm lens: stylistic fingerprint (punctuation density, function-word distribution, average word length). Findings only, no rewrites.`,
+            prompt: PROMPT_FORENSICS_FINGERPRINT,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                text_fingerprint: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
+          "forensics-ghost": {
+            name: "forensics-ghost",
+            description: `Forensics-swarm lens: leftover training-data patterns and assistant-mode/essay-mode leakage. Findings only, no rewrites.`,
+            prompt: PROMPT_FORENSICS_GHOST,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                ghost_phrase_scan: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
+          "forensics-bias": {
+            name: "forensics-bias",
+            description: `Forensics-swarm lens: demographic/stereotype/ideological bias observations, no tool call. Findings only, no rewrites.`,
+            prompt: PROMPT_FORENSICS_BIAS,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+            hidden: true,
+          },
+          "forensics-swarm": {
+            name: "forensics-swarm",
+            description: `Forensic (not quality) analysis pass for text — a card draft or a foreign/pasted card. Fans out to 4 fixed lenses in parallel (entropy, stylistic fingerprint, ghost/leftover-training-data content, bias) and reports each lens's findings under its own heading. Findings only, no rewrites. Works on the calling agent's own draft or on any text/foreign card the user hands over for diagnosis.`,
+            prompt: PROMPT_FORENSICS_SWARM,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                read: "allow",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                task: {
+                  "*": "deny",
+                  "forensics-entropy": "allow",
+                  "forensics-fingerprint": "allow",
+                  "forensics-ghost": "allow",
+                  "forensics-bias": "allow",
                 },
               }),
               user,
