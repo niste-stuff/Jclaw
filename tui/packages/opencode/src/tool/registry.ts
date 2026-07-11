@@ -1,7 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
-import { PlanExitTool, PlanEnterTool } from "./plan"
+import { PlanExitTool, PlanEnterTool, PeakEnterTool } from "./plan"
 import { Session } from "@/session/session"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
@@ -99,6 +99,7 @@ const layer = Layer.effect(
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
     const planEnter = yield* PlanEnterTool
+    const peakEnter = yield* PeakEnterTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
@@ -222,6 +223,7 @@ const layer = Layer.effect(
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
           planEnter: Tool.init(planEnter),
+          peakEnter: Tool.init(peakEnter),
         })
 
         return {
@@ -247,6 +249,7 @@ const layer = Layer.effect(
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             tool.plan,
             tool.planEnter,
+            tool.peakEnter,
           ],
           task: tool.task,
           read: tool.read,

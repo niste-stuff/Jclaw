@@ -1,0 +1,13 @@
+Use this tool when you have a concrete idea and are ready to hand off to the
+peak agent to start drafting a full character card from it.
+
+This tool will ask the user if they want to switch to the peak agent to begin
+building the card.
+
+Call this tool:
+- After presenting an idea and the user has picked it to expand into a card
+- When the concept is concrete enough that peak can start drafting from it
+
+Do NOT call this tool:
+- If the idea is still too thin to build a card from
+- If the user has not indicated they want to move to drafting yet

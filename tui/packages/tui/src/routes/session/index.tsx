@@ -322,6 +322,9 @@ export function Session() {
     } else if (part.tool === "plan_enter") {
       local.agent.set("lore planning")
       lastSwitch = part.id
+    } else if (part.tool === "peak_enter") {
+      local.agent.set("peak")
+      lastSwitch = part.id
     }
   })
 

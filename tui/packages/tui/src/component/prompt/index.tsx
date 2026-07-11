@@ -51,6 +51,7 @@ import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { DialogLore } from "../dialog-lore"
 import { DialogVoice } from "../dialog-voice"
+import { DialogIdeas } from "../dialog-ideas"
 import { Global } from "@opencode-ai/core/global"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
@@ -801,6 +802,57 @@ export function Prompt(props: PromptProps) {
                     "Read it first, then closely follow its formatting conventions, macro/pronoun habits, and prose register while writing fully original content — never reuse or lift phrasing from the profile itself, match the pattern, not the text.",
                     "",
                     "<describe the card or section you want written here>",
+                  ].join("\n"),
+                  "peak",
+                )
+              }}
+            />
+          ))
+        },
+      },
+      {
+        title: "Generate ideas",
+        desc: "Brainstorm distinct idea concepts for a topic, pick one to expand or save for later",
+        name: "card.ideas",
+        category: "Cards",
+        slashName: "ideas",
+        slashAliases: ["brainstorm"],
+        run: () => {
+          fillPrompt(
+            [
+              "Let's brainstorm some ideas. Ask me what topic to generate ideas for using the question tool.",
+              "",
+              "Once I answer, generate 5 distinct idea concepts for that topic — each a short title plus a 2-3 sentence hook. Make sure they genuinely differ in angle, tone, or twist rather than being reskins of one archetype.",
+              "",
+              `Then present them back to me via the question tool: a single-select question so I can pick one to expand into a card right now, and a multi-select question so I can mark any I want saved for later. Save whichever ones I mark under the ideas/ subfolder of my lore library at ${Global.Path.lore} (ask before overwriting an existing file, confirm the paths when done). If I pick one to expand, hand off to peak to start drafting it.`,
+            ].join("\n"),
+            "lore planning",
+          )
+        },
+      },
+      {
+        title: "Expand a saved idea",
+        desc: "Pick a saved idea from your library and build a card from it",
+        name: "card.ideasSaved",
+        category: "Cards",
+        slashName: "ideassaved",
+        slashAliases: ["savedideas"],
+        run: () => {
+          dialog.replace(() => (
+            <DialogIdeas
+              onPick={(picks) => {
+                const single = picks.length === 1
+                fillPrompt(
+                  [
+                    single
+                      ? `Build a full character card grounded in the idea at ${picks[0].path}`
+                      : `Build a full character card grounded in the ideas at:\n${picks.map((pick) => `- ${pick.path}`).join("\n")}`,
+                    "",
+                    single
+                      ? "Read that file first and treat it as the concept to build from."
+                      : "Read all of those files first. If they don't cohere into one character, flag the conflict and ask me how to combine or choose between them before writing.",
+                    "",
+                    "Then author all four boxes — personality (shown through specifics and contradictions, not adjective lists), appearance, the slice of backstory that still shapes them now, a distinct speech style with example lines, and a scenario. Finish with an opening message that drops {{user}} into a live scene without acting or speaking for them.",
                   ].join("\n"),
                   "peak",
                 )

@@ -63,7 +63,7 @@ and many sessions:
   remember.** Brainstorming (`lore planning`), world-authoring
   (`worldsmith`), card-writing (`peak`/`build`), and review are separate
   agents with separate permissions and separate prompts. Routing between
-  them is code (`plan_enter`, `task` calls), not a rule buried in a prompt
+  them is code (`plan_enter`, `peak_enter`, `task` calls), not a rule buried in a prompt
   that has to survive a long conversation — and long conversations are
   exactly where instruction-following degrades most.
 - **Real files in, real files out.** Cards and lorebooks are read, written,
@@ -305,6 +305,8 @@ Type `/` in the composer, or open the command palette with `ctrl+p`.
 | `/takes` | `/draftswarm` | Fans out 3 distinct-angle takes on a single card section (not the whole card) via `draft-swarm` and shows them for you to pick or modify — stays on the current agent. |
 | `/evolve` | `/refine` | Loops draft → review → auto-fix for up to N generations (default 3, e.g. `/evolve 5`) — fully unattended, ends with one summary line. Stays on the current agent. |
 | `/lorebook` | `/worldinfo` | Prefills a propose-then-confirm lorebook-authoring prompt for the current card, switches to `peak`. |
+| `/ideas` | `/brainstorm` | Switches to `lore planning`, asks for a topic, then generates 5 distinct idea concepts (deliberately varied angle/tone/twist, not five reskins of one archetype). Presents them via a single-select ("expand now") plus multi-select ("save for later") question — an expand pick hands off to `peak`; saved picks land under `ideas/` in your lore library. |
+| `/ideas saved` | `/savedideas` | Opens a picker over saved ideas, then hands the picked idea(s) to `peak` to build a card grounded in them. |
 | `/lore` | — | Opens a picker over your lore library, then hands the picked file's path to `peak` to build a card grounded in it. |
 | `/lore add` | `/addlore` | Prefills a save-into-the-lore-library prompt on `build`. |
 | `/world` | `/worldbuild` | Prefills a generate-a-cohesive-world prompt and switches to `worldsmith`; the world is saved under `worlds/` in your lore library. |
@@ -754,7 +756,7 @@ redacts file paths/contents/URLs as `[redacted:kind:id]` before you share it.
 |---|---|
 | `~/.config/opencode` | Config files (`opencode.json`, etc). |
 | `~/.local/share/opencode` | Data root: sessions DB, repo clones, logs. |
-| `~/.local/share/opencode/jclaw/lore/` | Your lore library (flat files or `collection/` subfolders; `.md`/`.txt`/`.json`). Worlds saved by `worldsmith` land in a `worlds/` subfolder here; voice profiles saved via `/voice add` land in a `voices/` subfolder. |
+| `~/.local/share/opencode/jclaw/lore/` | Your lore library (flat files or `collection/` subfolders; `.md`/`.txt`/`.json`). Worlds saved by `worldsmith` land in a `worlds/` subfolder here; voice profiles saved via `/voice add` land in a `voices/` subfolder; ideas saved via `/ideas` land in an `ideas/` subfolder. |
 | `~/.local/state/opencode` | Session state: selected model, theme, mode lock (`kv.json`). |
 
 ---
