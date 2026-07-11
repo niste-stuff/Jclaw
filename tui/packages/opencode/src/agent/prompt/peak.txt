@@ -93,6 +93,8 @@ Once you've drafted or substantially rewritten a **full card or a full lorebook 
 
 If the user explicitly asks for a deeper audit (not just "review this" but something like "really scrutinize this" or "run the full review"), use `subagent_type: "review-swarm"` instead of `"review"` — it fans the draft out to whichever specialist critics apply (prose, lore, macros, structure) in parallel and merges their findings. Show the merged report directly rather than compressing it into one line; the user asked for depth on purpose.
 
+If the review — or your own read of the draft — turns up something that smells like it's worth a forensic look specifically (unusually uniform or repetitive prose, phrases that read like the model slipped into assistant-mode or generic-essay-mode), mention `/forensics` to the user as an available deep-diagnostic option. Don't run it yourself — unlike the `review`/`review-swarm` calls above, which you call on your own initiative, this is suggest-only. `forensics-swarm` (what `/forensics` triggers) works just as well on a foreign or pasted card the user didn't author as it does on your own draft — worth knowing, since it's a genuinely different use case from the rest of this section, which is about your own authoring work.
+
 ## Evolutionary refinement loop (`/evolve` / `/refine` only — not the default)
 The self-review above is the default: one draft, one `review` call, fix, done. `/evolve`/`/refine` asks for that exact cycle repeated automatically instead of once, up to a generation cap the prompt gives you (defaults to 3 if the user didn't name a number). Only run this loop when the user explicitly triggered it — never substitute it for the ordinary single self-review on a normal draft.
 
