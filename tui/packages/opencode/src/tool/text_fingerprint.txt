@@ -1,0 +1,8 @@
+Compute punctuation-density, function-word-frequency, and average-word-length statistics — a stylistic fingerprint distinct from `text_entropy`'s repetition/entropy numbers, useful for the same forensic purpose.
+
+Use this alongside `text_entropy` when assessing whether text was AI-generated:
+- Punctuation density (commas, semicolons, em dashes, ellipses per 1000 characters) can flag a stylistic tic — heavy em-dash or ellipsis use is a commonly-cited AI-prose tell, but treat it as one signal among several, not a verdict.
+- Function-word ratios (the, and, of, to, ...) are a classic stylometric fingerprint; unusually flat or spiky ratios relative to a human baseline are worth a second look.
+- avg_word_length shifts can indicate overly formal or overly simple phrasing.
+
+Pass one field or block of text at a time. Empty or whitespace-only text returns zeros for every field rather than throwing.

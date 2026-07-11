@@ -1,0 +1,9 @@
+Scan text for a curated list of "ghost phrases" — stock wording that tends to leak through from AI generation — so you don't have to eyeball a card for these tells manually.
+
+Categories checked:
+- assistant_leakage: phrases like "as an AI" or "I'd be happy to" that leak the underlying assistant persona through the character's voice.
+- essay_transitions: formal essay connectives ("moreover", "furthermore", "in conclusion", "it's important to note") that read as generated rather than written in character.
+- stock_openers: generic scene-setting openers ("let's dive into", "picture this", "imagine a world where").
+- formulaic_contrast: the "it's not just X, it's Y" sentence shape, matched structurally rather than as a fixed phrase.
+
+Each match reports the phrase (or matched text, for formulaic_contrast), its category, and its character offset in the input. This is a mechanical lexical scan, not a verdict — a match is a prompt to look closer, not proof of AI generation on its own. Pass one field or block of text at a time.

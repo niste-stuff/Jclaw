@@ -1,0 +1,8 @@
+Compute text-statistics that flag AI-generation artifacts: character and word Shannon entropy, sentence-length shape, word-trigram repetition, and vocabulary richness — mechanically, so you don't have to eyeball a wall of text for "this reads suspiciously uniform."
+
+Use this whenever you're forensically assessing a card, lorebook entry, or arbitrary pasted prose for signs it was AI-dumped without an edit pass:
+- Low word entropy / low vocabulary richness / high repetition_rate often means repetitive, template-y phrasing.
+- Very uniform sentence lengths (low sentence_length_variance) can indicate mechanical, unedited generation; human prose tends to vary more.
+- Compare across sections of the same card, or against a known-human baseline, rather than reading absolute numbers in isolation — there's no single universal threshold.
+
+Pass one field or block of text at a time. Empty or whitespace-only text returns zeros for every field rather than throwing.

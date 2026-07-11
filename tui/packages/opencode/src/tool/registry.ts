@@ -17,6 +17,9 @@ import { WriteTool } from "./write"
 import { TokenizeTool } from "./tokenize"
 import { CardBudgetTool } from "./card_budget"
 import { CardMacroCheckTool } from "./card_macro_check"
+import { TextEntropyTool } from "./text_entropy"
+import { TextFingerprintTool } from "./text_fingerprint"
+import { GhostPhraseScanTool } from "./ghost_phrase_scan"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
@@ -112,6 +115,9 @@ const layer = Layer.effect(
     const tokenizetool = yield* TokenizeTool
     const cardbudgettool = yield* CardBudgetTool
     const cardmacrochecktool = yield* CardMacroCheckTool
+    const textentropytool = yield* TextEntropyTool
+    const textfingerprinttool = yield* TextFingerprintTool
+    const ghostphrasescantool = yield* GhostPhraseScanTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -219,6 +225,9 @@ const layer = Layer.effect(
           tokenize: Tool.init(tokenizetool),
           cardBudget: Tool.init(cardbudgettool),
           cardMacroCheck: Tool.init(cardmacrochecktool),
+          textEntropy: Tool.init(textentropytool),
+          textFingerprint: Tool.init(textfingerprinttool),
+          ghostPhraseScan: Tool.init(ghostphrasescantool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
@@ -246,6 +255,9 @@ const layer = Layer.effect(
             tool.tokenize,
             tool.cardBudget,
             tool.cardMacroCheck,
+            tool.textEntropy,
+            tool.textFingerprint,
+            tool.ghostPhraseScan,
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             tool.plan,
             tool.planEnter,
