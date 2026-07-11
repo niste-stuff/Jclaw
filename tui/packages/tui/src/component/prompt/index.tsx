@@ -659,6 +659,23 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
+        title: "Card forensics",
+        desc: "Deep statistical/bias analysis of a draft or a foreign card — not a quality check",
+        name: "card.forensics",
+        category: "Cards",
+        slashName: "forensics",
+        slashAliases: ["cardforensics"],
+        run: () => {
+          fillPrompt(
+            [
+              'Run a forensic analysis pass: call the task tool with subagent_type: "forensics-swarm" and hand it the text below — either the current draft, or (if I pasted/named a foreign card instead) that text — then show me the full merged report directly, one section per lens. This is a diagnostic pass for AI-generation artifacts, statistical patterns, and hidden bias, not a quality/craft review — don\'t confuse it with /swarm or condense it to a one-line note.',
+              "",
+              "<paste the card or text here, or attach the file — this can be your own draft or a card you didn't author>",
+            ].join("\n"),
+          )
+        },
+      },
+      {
         title: "Evolutionary refinement loop",
         desc: "Loop draft → review → auto-fix for up to N generations, unattended (default 3)",
         name: "card.evolve",
