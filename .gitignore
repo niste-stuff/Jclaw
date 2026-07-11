@@ -24,3 +24,6 @@ docs/superpowers/specs/
 # macOS Finder metadata
 .DS_Store
 **/.DS_Store
+# Superpowers subagent-driven-development scratch
+.worktrees/
+.superpowers/
