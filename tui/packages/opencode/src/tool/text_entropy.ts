@@ -97,6 +97,47 @@ export function computeTextEntropy(text: string): TextEntropyMetadata {
   }
 }
 
+function clamp01(n: number): number {
+  return Math.max(0, Math.min(1, n))
+}
+
+// Slop-risk sub-scores, 0-1 each, derived from the reading guidance in
+// forensics-entropy.txt: low vocab richness, low sentence-length variance,
+// high trigram repetition, and entropy far from a natural range are all
+// tells of mechanical/formulaic text. Heuristic thresholds, not corpus-fit
+// constants — expect these to move as more real cards get scored.
+function vocabRichnessRisk(vocabulary_richness: number): number {
+  return clamp01((0.6 - vocabulary_richness) / 0.3)
+}
+
+function sentenceVarianceRisk(sentence_length_variance: number): number {
+  return clamp01((8 - sentence_length_variance) / 7)
+}
+
+function repetitionRisk(repetition_rate: number): number {
+  return clamp01(repetition_rate / 0.3)
+}
+
+// U-shaped: both very low (repetitive) and very high (garbled) word entropy
+// are flagged, matching forensics-entropy.txt's "both directions" guidance.
+function wordEntropyRisk(shannon_entropy_word: number): number {
+  if (shannon_entropy_word >= 4 && shannon_entropy_word <= 8) return 0
+  const distance = shannon_entropy_word < 4 ? 4 - shannon_entropy_word : shannon_entropy_word - 8
+  return clamp01(distance / 4)
+}
+
+// 0-100 slop-risk score, higher = more mechanical/formulaic-reading. A
+// heuristic composite, not a verdict — same "signal, not proof" spirit as
+// the forensics-fingerprint hedging rule.
+export function computeEntropySlopScore(metadata: TextEntropyMetadata): number {
+  const risk =
+    0.25 * vocabRichnessRisk(metadata.vocabulary_richness) +
+    0.25 * sentenceVarianceRisk(metadata.sentence_length_variance) +
+    0.3 * repetitionRisk(metadata.repetition_rate) +
+    0.2 * wordEntropyRisk(metadata.shannon_entropy_word)
+  return Math.round(risk * 100)
+}
+
 export const Parameters = Schema.Struct({
   text: Schema.String.annotate({
     description: "The text to compute entropy/repetition/vocabulary statistics for.",
@@ -111,9 +152,10 @@ export const TextEntropyTool = Tool.define(
     execute: (params: Schema.Schema.Type<typeof Parameters>, _ctx: Tool.Context) =>
       Effect.gen(function* () {
         const metadata = computeTextEntropy(params.text)
+        const score = computeEntropySlopScore(metadata)
         return {
-          title: `entropy ${metadata.shannon_entropy_word.toFixed(2)} bits/word`,
-          output: `${metadata.shannon_entropy_char.toFixed(2)} bits/char · ${metadata.shannon_entropy_word.toFixed(2)} bits/word · ${metadata.avg_sentence_length.toFixed(1)} words/sentence · repetition ${(metadata.repetition_rate * 100).toFixed(1)}% · vocab richness ${metadata.vocabulary_richness.toFixed(2)}`,
+          title: `entropy ${metadata.shannon_entropy_word.toFixed(2)} bits/word · slop-risk ${score}/100`,
+          output: `${metadata.shannon_entropy_char.toFixed(2)} bits/char · ${metadata.shannon_entropy_word.toFixed(2)} bits/word · ${metadata.avg_sentence_length.toFixed(1)} words/sentence · repetition ${(metadata.repetition_rate * 100).toFixed(1)}% · vocab richness ${metadata.vocabulary_richness.toFixed(2)} · slop-risk ${score}/100`,
           metadata,
         }
       }).pipe(Effect.orDie),

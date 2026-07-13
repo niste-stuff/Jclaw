@@ -62,6 +62,29 @@ export function scanGhostPhrases(text: string): GhostPhraseScanMetadata {
   return { matches, match_count: matches.length }
 }
 
+// Per-match weights: assistant leakage is the loudest tell (it should
+// essentially never appear in in-character prose), formulaic contrast and
+// stock openers are strong, essay transitions are the mildest. Score is a
+// per-1000-word density, not a raw count, so a long card isn't punished just
+// for length. Weights are tuned so a single match in a typical card-length
+// text (a few hundred words) lands mid-range rather than saturating the clamp.
+const CATEGORY_WEIGHT: Record<string, number> = {
+  assistant_leakage: 25,
+  formulaic_contrast: 20,
+  stock_openers: 15,
+  essay_transitions: 8,
+}
+
+// 0-100 slop-risk score from ghost-phrase density. Higher = more leftover
+// assistant/essay-mode artifacts per 1000 words. Zero matches -> 0.
+export function computeGhostSlopScore(metadata: GhostPhraseScanMetadata, text: string): number {
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length
+  if (wordCount === 0 || metadata.match_count === 0) return 0
+  const weighted = metadata.matches.reduce((sum, m) => sum + (CATEGORY_WEIGHT[m.category] ?? 12), 0)
+  const perThousandWords = (weighted / wordCount) * 1000
+  return Math.min(100, Math.round(perThousandWords))
+}
+
 export const Parameters = Schema.Struct({
   text: Schema.String.annotate({
     description: "The text to scan for AI-generation \"ghost phrases\" (assistant leakage, stock transitions/openers, formulaic contrast sentences).",
@@ -76,12 +99,13 @@ export const GhostPhraseScanTool = Tool.define(
     execute: (params: Schema.Schema.Type<typeof Parameters>, _ctx: Tool.Context) =>
       Effect.gen(function* () {
         const metadata = scanGhostPhrases(params.text)
+        const score = computeGhostSlopScore(metadata, params.text)
         const output =
           metadata.match_count === 0
-            ? "no matches found"
-            : metadata.matches.map((m) => `"${m.phrase}" (${m.category})`).join("\n")
+            ? "no matches found · slop-risk 0/100"
+            : `${metadata.matches.map((m) => `"${m.phrase}" (${m.category})`).join("\n")}\nslop-risk ${score}/100`
         return {
-          title: `${metadata.match_count} ghost phrase(s) found`,
+          title: `${metadata.match_count} ghost phrase(s) found · slop-risk ${score}/100`,
           output,
           metadata,
         }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { scanGhostPhrases } from "../../src/tool/ghost_phrase_scan"
+import { scanGhostPhrases, computeGhostSlopScore } from "../../src/tool/ghost_phrase_scan"
 
 describe("scanGhostPhrases", () => {
   test("no matches on ordinary text", () => {
@@ -46,5 +46,47 @@ describe("scanGhostPhrases", () => {
     const result = scanGhostPhrases("Let's dive into this. Moreover, it's important to note the ending.")
     const categories = result.matches.map((m) => m.category).sort()
     expect(categories).toEqual(["essay_transitions", "essay_transitions", "stock_openers"])
+  })
+})
+
+describe("computeGhostSlopScore", () => {
+  // Neutral card-length filler with no ghost phrases in it, so a single
+  // injected phrase drives the whole score. ~300 words, matching a realistic
+  // card body — the density metric is meaningless on tiny fragments.
+  const filler = (words: number) => Array.from({ length: words }, (_, i) => `neutral${i % 40}`).join(" ")
+
+  test("clean text with no matches scores 0", () => {
+    const text = filler(300)
+    expect(computeGhostSlopScore(scanGhostPhrases(text), text)).toBe(0)
+  })
+
+  test("empty text scores 0", () => {
+    expect(computeGhostSlopScore(scanGhostPhrases(""), "")).toBe(0)
+  })
+
+  test("assistant_leakage is weighted heavier than an essay_transition at equal density", () => {
+    // Same-length bodies, one match each; assistant leakage (weight 25) must
+    // outscore an essay transition (weight 8).
+    const leak = `As an AI, ${filler(300)}`
+    const essay = `Moreover, ${filler(300)}`
+    const leakScore = computeGhostSlopScore(scanGhostPhrases(leak), leak)
+    const essayScore = computeGhostSlopScore(scanGhostPhrases(essay), essay)
+    expect(leakScore).toBeGreaterThan(essayScore)
+    expect(leakScore).toBeLessThanOrEqual(100)
+  })
+
+  test("score is a density: the same match in a longer text scores lower", () => {
+    const short = `Moreover, ${filler(200)}`
+    const long = `Moreover, ${filler(600)}`
+    const shortScore = computeGhostSlopScore(scanGhostPhrases(short), short)
+    const longScore = computeGhostSlopScore(scanGhostPhrases(long), long)
+    expect(shortScore).toBeGreaterThan(longScore)
+  })
+
+  test("score is clamped to a 0-100 range even with dense leakage", () => {
+    const dense = "As an AI. As an AI. Certainly! As an AI."
+    const score = computeGhostSlopScore(scanGhostPhrases(dense), dense)
+    expect(score).toBeGreaterThanOrEqual(0)
+    expect(score).toBeLessThanOrEqual(100)
   })
 })

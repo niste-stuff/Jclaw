@@ -84,6 +84,54 @@ export function computeTextFingerprint(text: string): TextFingerprintMetadata {
   return { punctuation_density, function_word_ratio, avg_word_length }
 }
 
+function clamp01(n: number): number {
+  return Math.max(0, Math.min(1, n))
+}
+
+// Em-dash density is a widely-noted LLM signature at BOTH extremes
+// (forensics-fingerprint.txt): heavy use is the classic tell, but near-total
+// absence in longer prose is also flagged. Natural em-dash density sits
+// roughly 0.5-3 per 1000 chars; risk climbs outside that band.
+function emDashRisk(em_dash: number): number {
+  if (em_dash >= 0.5 && em_dash <= 3) return 0
+  const distance = em_dash < 0.5 ? 0.5 - em_dash : em_dash - 3
+  const scale = em_dash < 0.5 ? 0.5 : 5
+  return clamp01(distance / scale)
+}
+
+// A flat/uniform function-word distribution reads as mechanical; natural
+// language has an uneven spread. Use the coefficient of variation of the
+// function-word ratios — low spread means high risk.
+function functionWordFlatnessRisk(ratios: Record<string, number>): number {
+  const values = Object.values(ratios)
+  if (values.length === 0) return 0
+  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  if (mean === 0) return 0
+  const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length
+  const coefficientOfVariation = Math.sqrt(variance) / mean
+  // A healthy natural spread has CV around 1.0+; flatter than ~0.6 is a tell.
+  return clamp01((0.6 - coefficientOfVariation) / 0.6)
+}
+
+// Average word length far from natural conversational prose (~4-5.5 chars)
+// in either direction — unusually formal or unusually simple — is a mention.
+function wordLengthRisk(avg_word_length: number): number {
+  if (avg_word_length >= 4 && avg_word_length <= 5.5) return 0
+  const distance = avg_word_length < 4 ? 4 - avg_word_length : avg_word_length - 5.5
+  return clamp01(distance / 2)
+}
+
+// 0-100 slop-risk score, higher = more mechanically uniform stylistic
+// fingerprint. Heuristic composite, never a "this was written by AI" verdict
+// — one signal, hedged, per the forensics-fingerprint rule.
+export function computeFingerprintSlopScore(metadata: TextFingerprintMetadata): number {
+  const risk =
+    0.4 * emDashRisk(metadata.punctuation_density.em_dash) +
+    0.4 * functionWordFlatnessRisk(metadata.function_word_ratio) +
+    0.2 * wordLengthRisk(metadata.avg_word_length)
+  return Math.round(risk * 100)
+}
+
 export const Parameters = Schema.Struct({
   text: Schema.String.annotate({
     description: "The text to compute punctuation-density, function-word, and word-length statistics for.",
@@ -99,9 +147,10 @@ export const TextFingerprintTool = Tool.define(
       Effect.gen(function* () {
         const metadata = computeTextFingerprint(params.text)
         const { comma, semicolon, em_dash, ellipsis } = metadata.punctuation_density
+        const score = computeFingerprintSlopScore(metadata)
         return {
-          title: `avg word ${metadata.avg_word_length.toFixed(2)} chars`,
-          output: `comma ${comma.toFixed(1)}/1k · semicolon ${semicolon.toFixed(1)}/1k · em dash ${em_dash.toFixed(1)}/1k · ellipsis ${ellipsis.toFixed(1)}/1k · avg word length ${metadata.avg_word_length.toFixed(2)} chars`,
+          title: `avg word ${metadata.avg_word_length.toFixed(2)} chars · slop-risk ${score}/100`,
+          output: `comma ${comma.toFixed(1)}/1k · semicolon ${semicolon.toFixed(1)}/1k · em dash ${em_dash.toFixed(1)}/1k · ellipsis ${ellipsis.toFixed(1)}/1k · avg word length ${metadata.avg_word_length.toFixed(2)} chars · slop-risk ${score}/100`,
           metadata,
         }
       }).pipe(Effect.orDie),

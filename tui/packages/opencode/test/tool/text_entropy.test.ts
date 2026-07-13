@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { computeTextEntropy } from "../../src/tool/text_entropy"
+import { computeTextEntropy, computeEntropySlopScore } from "../../src/tool/text_entropy"
 
 describe("computeTextEntropy", () => {
   test("empty text returns zeros for every field", () => {
@@ -66,5 +66,31 @@ describe("computeTextEntropy", () => {
     expect(result.avg_sentence_length).toBe(1)
     expect(result.sentence_length_variance).toBe(0)
     expect(result.shannon_entropy_word).toBe(0)
+  })
+})
+
+describe("computeEntropySlopScore", () => {
+  test("score is always within 0-100", () => {
+    for (const text of ["", "hello world", "the cat sat the cat sat the cat sat", "One two three. Four five. Six seven eight nine."]) {
+      const score = computeEntropySlopScore(computeTextEntropy(text))
+      expect(score).toBeGreaterThanOrEqual(0)
+      expect(score).toBeLessThanOrEqual(100)
+    }
+  })
+
+  test("heavily repeated, low-vocabulary text scores higher than varied text", () => {
+    const repetitive = computeEntropySlopScore(computeTextEntropy("the cat sat the cat sat the cat sat the cat sat"))
+    const varied = computeEntropySlopScore(
+      computeTextEntropy(
+        "The morning fog clung to the harbor. Gulls wheeled overhead, screaming. Somewhere below, a bell tolled its slow warning through the grey.",
+      ),
+    )
+    expect(repetitive).toBeGreaterThan(varied)
+  })
+
+  test("high trigram repetition drives the repetition component up", () => {
+    // All trigrams repeat -> repetition_rate 1 -> repetition risk maxed (0.3 of the score).
+    const score = computeEntropySlopScore(computeTextEntropy("the cat sat the cat sat the cat sat"))
+    expect(score).toBeGreaterThanOrEqual(30)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { computeTextFingerprint } from "../../src/tool/text_fingerprint"
+import { computeTextFingerprint, computeFingerprintSlopScore } from "../../src/tool/text_fingerprint"
 
 describe("computeTextFingerprint", () => {
   test("empty text returns zeros for every field", () => {
@@ -34,5 +34,31 @@ describe("computeTextFingerprint", () => {
   test("word-boundary match does not count 'the' inside 'there' or 'theme'", () => {
     const result = computeTextFingerprint("there is a theme")
     expect(result.function_word_ratio.the).toBe(0)
+  })
+})
+
+describe("computeFingerprintSlopScore", () => {
+  test("score is always within 0-100", () => {
+    for (const text of ["", "the cat and the dog are the best", "Hello, world; wait--what? Really... yes—no."]) {
+      const score = computeFingerprintSlopScore(computeTextFingerprint(text))
+      expect(score).toBeGreaterThanOrEqual(0)
+      expect(score).toBeLessThanOrEqual(100)
+    }
+  })
+
+  test("natural prose with a moderate em-dash rate and uneven function words scores low", () => {
+    const natural =
+      "The morning fog clung to the harbor — thick, grey, and cold. Gulls wheeled overhead. Somewhere a bell tolled, and the fishermen who had not yet gone out to sea watched the water with the patience of men who know it well."
+    expect(computeFingerprintSlopScore(computeTextFingerprint(natural))).toBeLessThan(50)
+  })
+
+  test("total absence of em-dashes in longer prose adds to the score", () => {
+    const noEmDash =
+      "The morning fog clung to the harbor, thick and grey and cold. Gulls wheeled overhead. Somewhere a bell tolled, and the fishermen watched the water with patience."
+    const withEmDash =
+      "The morning fog clung to the harbor — thick and grey and cold. Gulls wheeled overhead. Somewhere a bell tolled, and the fishermen watched the water with patience."
+    const scoreNo = computeFingerprintSlopScore(computeTextFingerprint(noEmDash))
+    const scoreWith = computeFingerprintSlopScore(computeTextFingerprint(withEmDash))
+    expect(scoreNo).toBeGreaterThan(scoreWith)
   })
 })
