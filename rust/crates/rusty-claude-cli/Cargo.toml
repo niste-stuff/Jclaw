@@ -5,15 +5,9 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[[bin]]
-name = "claw"
-path = "src/main.rs"
-
-# Primary jclaw binary. `jclaw` with no subcommand launches the vendored
-# full-screen TUI (see src/tui.rs).
-[[bin]]
-name = "jclaw"
-path = "src/main.rs"
+# Both `claw` and `jclaw` are thin shims in src/bin/ over the crate library,
+# so the shared CLI is compiled once. Cargo auto-discovers the lib (src/lib.rs)
+# and both binaries (src/bin/*.rs); no explicit [[bin]] entries are needed.
 
 [dependencies]
 api = { path = "../api" }

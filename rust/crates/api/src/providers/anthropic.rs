@@ -16,9 +16,7 @@ use crate::error::ApiError;
 use crate::http_client::build_http_client_or_default;
 use crate::prompt_cache::{PromptCache, PromptCacheRecord, PromptCacheStats};
 
-use super::{
-    anthropic_missing_credentials, model_token_limit, resolve_model_alias, Provider, ProviderFuture,
-};
+use super::{anthropic_missing_credentials, model_token_limit, resolve_model_alias};
 use crate::sse::SseParser;
 use crate::types::{MessageDeltaEvent, MessageRequest, MessageResponse, StreamEvent, Usage};
 
@@ -792,24 +790,6 @@ fn request_id_from_headers(headers: &reqwest::header::HeaderMap) -> Option<Strin
         .map(ToOwned::to_owned)
 }
 
-impl Provider for AnthropicClient {
-    type Stream = MessageStream;
-
-    fn send_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, MessageResponse> {
-        Box::pin(async move { self.send_message(request).await })
-    }
-
-    fn stream_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, Self::Stream> {
-        Box::pin(async move { self.stream_message(request).await })
-    }
-}
-
 #[derive(Debug)]
 pub struct MessageStream {
     request_id: Option<String>,
@@ -924,22 +904,6 @@ fn parse_retry_after(
 
 const fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 408 | 409 | 429 | 500 | 502 | 503 | 504)
-}
-
-/// Some providers return HTTP 400 with an unparseable body when a gateway
-/// or proxy flakes (e.g. "HTTP 400 from backend (no parseable body)").
-/// These are transient network blips, not actual bad requests, and should
-/// be retried. We detect them by checking the body for known gateway error
-/// phrases.
-fn is_retryable_400(status: reqwest::StatusCode, body: &str) -> bool {
-    if status != reqwest::StatusCode::BAD_REQUEST {
-        return false;
-    }
-    let lowered = body.to_ascii_lowercase();
-    lowered.contains("no parseable body")
-        || lowered.contains("connection reset")
-        || lowered.contains("broken pipe")
-        || lowered.contains("empty reply from server")
 }
 
 /// Anthropic API keys (`sk-ant-*`) are accepted over the `x-api-key` header

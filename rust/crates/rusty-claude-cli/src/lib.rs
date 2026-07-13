@@ -340,7 +340,13 @@ type RuntimePluginStateBuildOutput = (
     Vec<RuntimeToolDefinition>,
 );
 
-fn main() {
+/// Shared entry point for the `claw` and `jclaw` binaries.
+///
+/// Both binaries are byte-identical; they differ only in the name they are
+/// invoked as (see [`invoked_cli_name`]). Keeping the logic in the library and
+/// exposing one entry point lets the two `src/bin/*.rs` shims stay trivial and
+/// avoids compiling this crate twice.
+pub fn run_cli() {
     if let Err(error) = run() {
         let message = error.to_string();
         // When --output-format json is active, emit errors as JSON so downstream
@@ -16358,8 +16364,10 @@ mod tests {
         let config_home = root.join("config-home");
         std::fs::create_dir_all(&cwd).expect("project dir should exist");
         std::fs::create_dir_all(&config_home).expect("config home should exist");
+        // mcpServers is trust-sensitive, so it must come from a trusted
+        // (User) scope, not the untrusted project-scope .claw.json.
         std::fs::write(
-            cwd.join(".claw.json"),
+            config_home.join("settings.json"),
             r#"{
   "mcpServers": {
     "missing-command": {"args": ["arg-only-no-command"]}
@@ -16367,7 +16375,7 @@ mod tests {
 }
 "#,
         )
-        .expect("write malformed .claw.json");
+        .expect("write malformed settings.json");
 
         let previous_config_home = std::env::var("CLAW_CONFIG_HOME").ok();
         std::env::set_var("CLAW_CONFIG_HOME", &config_home);
@@ -16411,23 +16419,33 @@ mod tests {
         let _guard = env_lock();
         let root = temp_dir();
         let cwd = root.join("project-with-malformed-mcp");
+        let config_home = root.join("config-home");
         std::fs::create_dir_all(&cwd).expect("project dir should exist");
+        std::fs::create_dir_all(&config_home).expect("config home should exist");
         // Top-level `mcpServers` shape errors still degrade through the
         // config_load_error path; per-server errors are handled by the #440
-        // MCP validation summary instead.
+        // MCP validation summary instead. mcpServers is trust-sensitive, so
+        // it must come from a trusted (User) scope, not the untrusted
+        // project-scope .claw.json.
         std::fs::write(
-            cwd.join(".claw.json"),
+            config_home.join("settings.json"),
             r#"{
   "mcpServers": "not-an-object"
 }
 "#,
         )
-        .expect("write malformed .claw.json");
+        .expect("write malformed settings.json");
 
+        let previous_config_home = std::env::var("CLAW_CONFIG_HOME").ok();
+        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
         let context = with_current_dir(&cwd, || {
             super::status_context(None)
                 .expect("status_context should not hard-fail on config parse errors (#143)")
         });
+        match previous_config_home {
+            Some(value) => std::env::set_var("CLAW_CONFIG_HOME", value),
+            None => std::env::remove_var("CLAW_CONFIG_HOME"),
+        }
 
         // Config-shape errors still populate config_load_error.
         let err = context
@@ -18640,8 +18658,15 @@ mod tests {
         git(&["config", "user.email", "tests@example.com"], &workspace);
         git(&["config", "user.name", "Rusty Claude Tests"], &workspace);
         fs::write(workspace.join("tracked.txt"), "hello\n").expect("write tracked");
-        fs::write(workspace.join(".claw.json"), r#"{"trustedRoots": ["."]}"#)
-            .expect("write config");
+        // trustedRoots is a trust-sensitive key, so it only takes effect from a
+        // trusted scope. Project-scoped .claw.json (checked-in, untrusted) would
+        // have it stripped; put it in the machine-local settings instead.
+        fs::create_dir_all(workspace.join(".claw")).expect("create .claw dir");
+        fs::write(
+            workspace.join(".claw").join("settings.local.json"),
+            r#"{"trustedRoots": ["."]}"#,
+        )
+        .expect("write config");
         git(&["add", "tracked.txt"], &workspace);
         git(&["commit", "-m", "init", "--quiet"], &workspace);
 

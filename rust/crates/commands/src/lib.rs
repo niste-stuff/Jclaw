@@ -6794,7 +6794,7 @@ mod tests {
         fs::create_dir_all(workspace.join(".claw")).expect("workspace config dir");
         fs::create_dir_all(&config_home).expect("config home");
         fs::write(
-            workspace.join(".claw").join("settings.json"),
+            config_home.join("settings.json"),
             r#"{
               "mcpServers": {
                 "alpha": {
@@ -6837,10 +6837,11 @@ mod tests {
         assert!(list.contains("Configured servers 2"));
         assert!(list.contains("alpha"));
         assert!(list.contains("stdio"));
-        assert!(list.contains("project"));
         assert!(list.contains("uvx alpha-server"));
         assert!(list.contains("remote"));
         assert!(list.contains("ws"));
+        // alpha now comes from trusted User scope, remote-override from Local.
+        assert!(list.contains("user"));
         assert!(list.contains("local"));
         assert!(list.contains("wss://remote.example/mcp"));
 
@@ -6873,7 +6874,7 @@ mod tests {
         fs::create_dir_all(workspace.join(".claw")).expect("workspace config dir");
         fs::create_dir_all(&config_home).expect("config home");
         fs::write(
-            workspace.join(".claw").join("settings.json"),
+            config_home.join("settings.json"),
             r#"{
               "mcpServers": {
                 "alpha": {
@@ -6960,9 +6961,12 @@ mod tests {
         let config_home = temp_dir("mcp-degrades-144-cfg");
         fs::create_dir_all(workspace.join(".claw")).expect("create workspace .claw dir");
         fs::create_dir_all(&config_home).expect("create config home");
-        // One valid server + one malformed entry missing `command`.
+        // One valid server + one malformed entry missing `command`. Written to
+        // the machine-local (trusted) settings file: project-scoped .claw.json
+        // may not define mcpServers, and this file is scoped to `workspace` so it
+        // does not leak into the clean loader below (which shares config_home).
         fs::write(
-            workspace.join(".claw.json"),
+            workspace.join(".claw").join("settings.local.json"),
             r#"{
   "mcpServers": {
     "everything": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything"]},
@@ -6971,7 +6975,7 @@ mod tests {
 }
 "#,
         )
-        .expect("write malformed .claw.json");
+        .expect("write malformed settings.local.json");
 
         let loader = ConfigLoader::new(&workspace, &config_home);
         // list action: must return Ok (not Err) with degraded envelope.

@@ -1184,8 +1184,10 @@ mod tests {
         let root = temp_dir();
         fs::create_dir_all(root.join(".claw")).expect("claw dir");
         fs::write(root.join("CLAUDE.md"), "Project rules").expect("write instructions");
+        // permissionMode is trust-sensitive, so it must come from Local scope
+        // (git-ignored, machine-authored), not the untrusted project settings.
         fs::write(
-            root.join(".claw").join("settings.json"),
+            root.join(".claw").join("settings.local.json"),
             r#"{"permissionMode":"acceptEdits"}"#,
         )
         .expect("write settings");
@@ -1322,8 +1324,10 @@ mod tests {
         let root = temp_dir();
         fs::create_dir_all(root.join(".claw")).expect("claw dir");
         fs::write(root.join("CLAUDE.md"), "Project rules").expect("write CLAUDE.md");
+        // permissionMode is trust-sensitive, so it must come from Local scope
+        // (git-ignored, machine-authored), not the untrusted project settings.
         fs::write(
-            root.join(".claw").join("settings.json"),
+            root.join(".claw").join("settings.local.json"),
             r#"{"permissionMode":"acceptEdits"}"#,
         )
         .expect("write settings");

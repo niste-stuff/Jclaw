@@ -6971,8 +6971,6 @@ fn parse_skill_description(contents: &str) -> Option<String> {
     None
 }
 
-pub mod lane_completion;
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -7274,14 +7272,17 @@ mod tests {
     #[test]
     fn worker_create_merges_config_trusted_roots_without_per_call_override() {
         use std::fs;
-        // Write a .claw/settings.json in a temp dir with trustedRoots
+        // Write a .claw/settings.local.json in a temp dir with trustedRoots.
+        // trustedRoots is trust-sensitive, so it only takes effect from a
+        // trusted scope (Local, git-ignored) — not the untrusted project
+        // .claw/settings.json.
         let worktree = temp_path("config-trust-worktree");
         let claw_dir = worktree.join(".claw");
         fs::create_dir_all(&claw_dir).expect("create .claw dir");
         // Use the actual OS temp dir so the worktree path matches the allowlist
         let tmp_root = std::env::temp_dir().to_str().expect("utf-8").to_string();
         let settings = format!("{{\"trustedRoots\": [\"{tmp_root}\"]}}");
-        fs::write(claw_dir.join("settings.json"), settings).expect("write settings");
+        fs::write(claw_dir.join("settings.local.json"), settings).expect("write settings");
 
         // WorkerCreate with no per-call trusted_roots — config should supply them
         let cwd = worktree.to_str().expect("valid utf-8").to_string();

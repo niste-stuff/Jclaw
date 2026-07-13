@@ -1767,8 +1767,10 @@ fn mcp_json_reports_required_optional_and_redacts_secret_values() {
     fs::create_dir_all(root.join(".claw")).expect("workspace config should exist");
     fs::create_dir_all(&config_home).expect("config home should exist");
     fs::create_dir_all(&home).expect("home should exist");
+    // mcpServers is trust-sensitive, so it must come from Local scope
+    // (git-ignored, machine-authored), not the untrusted project settings.
     fs::write(
-        root.join(".claw").join("settings.json"),
+        root.join(".claw").join("settings.local.json"),
         r#"{
           "mcpServers": {
             "required-stdio": {
@@ -1856,11 +1858,13 @@ fn mcp_degraded_config_and_failed_usage_are_distinct_json_contracts() {
     let workspace = root.join("workspace");
     let config_home = root.join("config-home");
     let home = root.join("home");
-    fs::create_dir_all(&workspace).expect("workspace should exist");
+    fs::create_dir_all(workspace.join(".claw")).expect("workspace config dir should exist");
     fs::create_dir_all(&config_home).expect("config home should exist");
     fs::create_dir_all(&home).expect("home should exist");
+    // mcpServers is trust-sensitive, so it must come from Local scope
+    // (git-ignored, machine-authored), not the untrusted project settings.
     fs::write(
-        workspace.join(".claw.json"),
+        workspace.join(".claw").join("settings.local.json"),
         r#"{
           "mcpServers": {
             "valid-server": {
@@ -2211,14 +2215,18 @@ fn config_json_attributes_precedence_and_shadowed_keys_425() {
     fs::create_dir_all(root.join(".claw")).expect("workspace config should exist");
     fs::create_dir_all(&config_home).expect("config home should exist");
     fs::create_dir_all(&home).expect("home should exist");
+    // `env` is trust-sensitive and stripped at Project scope; `aliases` is on
+    // the trusted-key allowlist and shares the same string-map shape, so it
+    // stands in here for exercising precedence/shadowing across two
+    // project-scope files.
     fs::write(
         root.join(".claw.json"),
-        r#"{"model":"anthropic/claude-sonnet-4-6","env":{"A":"legacy","B":"legacy"}}"#,
+        r#"{"model":"anthropic/claude-sonnet-4-6","aliases":{"A":"legacy","B":"legacy"}}"#,
     )
     .expect("legacy project config fixture should write");
     fs::write(
         root.join(".claw").join("settings.json"),
-        r#"{"model":"anthropic/claude-opus-4-6","env":{"A":"settings","C":"settings"}}"#,
+        r#"{"model":"anthropic/claude-opus-4-6","aliases":{"A":"settings","C":"settings"}}"#,
     )
     .expect("project settings fixture should write");
 
@@ -2257,7 +2265,7 @@ fn config_json_attributes_precedence_and_shadowed_keys_425() {
             > legacy["precedence_rank"].as_u64().expect("legacy rank"),
         "later project settings must outrank legacy project config: legacy={legacy} settings={settings}"
     );
-    for key in ["model", "env.A"] {
+    for key in ["model", "aliases.A"] {
         assert!(
             legacy["shadowed_keys"]
                 .as_array()
@@ -2280,7 +2288,7 @@ fn config_json_attributes_precedence_and_shadowed_keys_425() {
             .as_array()
             .expect("legacy winning keys")
             .iter()
-            .any(|value| value.as_str() == Some("env.B")),
+            .any(|value| value.as_str() == Some("aliases.B")),
         "unshadowed legacy keys should remain attributed to .claw.json: {legacy}"
     );
 }

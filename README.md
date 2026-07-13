@@ -119,7 +119,7 @@ TypeScript front end through Bun rather than embedding it, **edits under
 **Dev alternative** (needs a real TTY):
 
 ```sh
-cd rust && cargo run --bin claw -- tui
+cd rust && cargo run --bin jclaw -- tui
 ```
 
 **Prerequisites:** a Rust toolchain, Bun (`~/.bun/bin/bun`), and `bun install`
@@ -690,6 +690,16 @@ sections 1–10 of this doc runs there, not through this CLI layer.
 external agent integration) is scaffolded but not implemented: `jclaw acp
 [serve]` only prints a status report confirming no daemon or JSON-RPC
 endpoint is running yet.
+
+**Config trust boundary:** `.claw.json` and `.claw/settings.json` at the
+project root are treated as untrusted — they're checked into the repo and
+arrive on `git clone`, so a malicious repo shouldn't be able to run code on
+first launch. Only inert keys (`model`, `aliases`, `apiTimeout`,
+`providerFallbacks`, `rulesImport`) are honored from those files; anything
+else (`hooks`, `mcpServers`, `permissions`, `permissionMode`, `env`,
+`trustedRoots`, `sandbox`, ...) is dropped with a warning. Put those in
+`.claw/settings.local.json` instead (git-ignored, machine-local, fully
+trusted) or in the user-level config under `CLAW_CONFIG_HOME`.
 
 Rust-side launcher env overrides (not opencode config — these control how
 the Rust binary finds Bun/the TUI, see `rust/crates/rusty-claude-cli/src/tui.rs`):

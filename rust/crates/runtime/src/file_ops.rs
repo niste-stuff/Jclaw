@@ -38,7 +38,6 @@ fn is_binary_file(path: &Path) -> io::Result<bool> {
 /// Validate that a resolved path stays within the given workspace root.
 /// Returns the canonical path on success, or an error if the path escapes
 /// the workspace boundary (e.g. via `../` traversal or symlink).
-#[allow(dead_code)]
 fn validate_workspace_boundary(resolved: &Path, workspace_root: &Path) -> io::Result<()> {
     if !resolved.starts_with(workspace_root) {
         return Err(io::Error::new(
@@ -392,10 +391,13 @@ fn line_trimmed_replacer(content: &str, find: &str) -> Vec<String> {
 fn block_anchor_replacer(content: &str, find: &str) -> Vec<String> {
     let original: Vec<&str> = content.split('\n').collect();
     let mut search: Vec<&str> = find.split('\n').collect();
+    // Trim before the length guard so `block_size` reflects the real content:
+    // a trailing newline in `find` (e.g. "a\nb\n") must not smuggle a 2-line
+    // block past the >=3-line minimum this anchored matcher assumes.
+    trim_trailing_empty(&mut search);
     if search.len() < 3 {
         return Vec::new();
     }
-    trim_trailing_empty(&mut search);
     let first = search[0].trim();
     let last = search[search.len() - 1].trim();
     let block_size = search.len();
@@ -1114,7 +1116,6 @@ fn normalize_path_allow_missing(path: &str) -> io::Result<PathBuf> {
 }
 
 /// Read a file with workspace boundary enforcement.
-#[allow(dead_code)]
 pub fn read_file_in_workspace(
     path: &str,
     offset: Option<usize>,
@@ -1172,7 +1173,6 @@ fn check_truncation_guard(
 /// `allow_shrink` opts out of the truncation guard that rejects writes which
 /// would shrink a substantial existing file by more than half (see
 /// [`check_truncation_guard`]).
-#[allow(dead_code)]
 pub fn write_file_in_workspace(
     path: &str,
     content: &str,
@@ -1187,7 +1187,6 @@ pub fn write_file_in_workspace(
 }
 
 /// Edit a file with workspace boundary enforcement.
-#[allow(dead_code)]
 pub fn edit_file_in_workspace(
     path: &str,
     old_string: &str,
@@ -1202,7 +1201,6 @@ pub fn edit_file_in_workspace(
 }
 
 /// Expand a glob pattern with workspace boundary enforcement.
-#[allow(dead_code)]
 pub fn glob_search_in_workspace(
     pattern: &str,
     path: Option<&str>,
@@ -1212,26 +1210,11 @@ pub fn glob_search_in_workspace(
 }
 
 /// Search file contents with workspace boundary enforcement.
-#[allow(dead_code)]
 pub fn grep_search_in_workspace(
     input: &GrepSearchInput,
     workspace_root: &Path,
 ) -> io::Result<GrepSearchOutput> {
     grep_search_impl(input, Some(workspace_root))
-}
-
-/// Check whether a path is a symlink that resolves outside the workspace.
-#[allow(dead_code)]
-pub fn is_symlink_escape(path: &Path, workspace_root: &Path) -> io::Result<bool> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_symlink() {
-        return Ok(false);
-    }
-    let resolved = path.canonicalize()?;
-    let canonical_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
-    Ok(!resolved.starts_with(&canonical_root))
 }
 
 /// Expand shell-style brace groups in a glob pattern.
@@ -1263,9 +1246,8 @@ mod tests {
 
     use super::{
         component_contains_glob, derive_glob_walk_root, edit_file, edit_file_in_workspace,
-        expand_braces, glob_search, grep_search, is_symlink_escape, read_file,
-        read_file_in_workspace, write_file, write_file_in_workspace, GrepSearchInput,
-        MAX_WRITE_SIZE,
+        expand_braces, glob_search, grep_search, read_file, read_file_in_workspace, write_file,
+        write_file_in_workspace, GrepSearchInput, MAX_WRITE_SIZE,
     };
 
     fn temp_path(name: &str) -> std::path::PathBuf {
@@ -1378,26 +1360,6 @@ mod tests {
             sibling_contents,
             "editing one card must not touch another"
         );
-    }
-
-    #[test]
-    fn detects_symlink_escape() {
-        let workspace = temp_path("symlink-workspace");
-        std::fs::create_dir_all(&workspace).expect("workspace dir should be created");
-        let outside = temp_path("symlink-target.txt");
-        std::fs::write(&outside, "target content").expect("target should write");
-
-        let link_path = workspace.join("escape-link.txt");
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&outside, &link_path).expect("symlink should create");
-            assert!(is_symlink_escape(&link_path, &workspace).expect("check should succeed"));
-        }
-
-        // Non-symlink file should not be an escape
-        let normal = workspace.join("normal.txt");
-        std::fs::write(&normal, "normal content").expect("normal file should write");
-        assert!(!is_symlink_escape(&normal, &workspace).expect("check should succeed"));
     }
 
     #[test]

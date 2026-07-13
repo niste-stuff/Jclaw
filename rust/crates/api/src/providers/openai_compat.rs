@@ -16,7 +16,7 @@ use crate::types::{
     ToolChoice, ToolDefinition, ToolResultContentBlock, Usage,
 };
 
-use super::{preflight_message_request, resolve_model_alias, Provider, ProviderFuture};
+use super::{preflight_message_request, resolve_model_alias};
 
 pub const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
@@ -412,24 +412,6 @@ fn jitter_for_base(base: Duration) -> Duration {
     mixed ^= mixed >> 31;
     let jitter_nanos = mixed % base_nanos.saturating_add(1);
     Duration::from_nanos(jitter_nanos)
-}
-
-impl Provider for OpenAiCompatClient {
-    type Stream = MessageStream;
-
-    fn send_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, MessageResponse> {
-        Box::pin(async move { self.send_message(request).await })
-    }
-
-    fn stream_message<'a>(
-        &'a self,
-        request: &'a MessageRequest,
-    ) -> ProviderFuture<'a, Self::Stream> {
-        Box::pin(async move { self.stream_message(request).await })
-    }
 }
 
 #[derive(Debug)]
@@ -978,29 +960,6 @@ pub fn model_requires_reasoning_content_in_history(model: &str) -> bool {
     let lowered = model.to_ascii_lowercase();
     let canonical = lowered.rsplit('/').next().unwrap_or(lowered.as_str());
     canonical.starts_with("deepseek-v4")
-}
-
-/// Strip routing prefix (e.g., "openai/gpt-4" → "gpt-4") for the wire.
-/// The prefix is used only to select transport; the backend expects the
-/// bare model id. Use `local/` to force OpenAI-compatible routing while
-/// preserving any slashes that follow the prefix.
-#[allow(dead_code)]
-fn strip_routing_prefix(model: &str) -> &str {
-    if let Some(pos) = model.find('/') {
-        let prefix = &model[..pos];
-        // Only strip if the prefix before "/" is a known routing prefix,
-        // not if "/" appears in the middle of the model name for other reasons.
-        if matches!(
-            prefix,
-            "openai" | "xai" | "grok" | "qwen" | "kimi" | "local"
-        ) {
-            &model[pos + 1..]
-        } else {
-            model
-        }
-    } else {
-        model
-    }
 }
 
 fn normalize_base_url_for_model_routing(url: &str) -> &str {
@@ -1783,21 +1742,6 @@ const fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 408 | 409 | 429 | 500 | 502 | 503 | 504)
 }
 
-/// Some providers return HTTP 400 with an unparseable body when a gateway
-/// or proxy flakes (e.g. "HTTP 400 from backend (no parseable body)").
-/// These are transient network blips, not actual bad requests, and should
-/// be retried.
-fn is_retryable_400(status: reqwest::StatusCode, body: &str) -> bool {
-    if status != reqwest::StatusCode::BAD_REQUEST {
-        return false;
-    }
-    let lowered = body.to_ascii_lowercase();
-    lowered.contains("no parseable body")
-        || lowered.contains("connection reset")
-        || lowered.contains("broken pipe")
-        || lowered.contains("empty reply from server")
-}
-
 /// Generate a suggested user action based on the HTTP status code and error context.
 /// This provides actionable guidance when API requests fail.
 fn suggested_action_for_status(status: reqwest::StatusCode) -> Option<String> {
@@ -2530,10 +2474,8 @@ mod tests {
     fn delta_with_null_tool_calls_deserializes_as_empty_vec() {
         use super::deserialize_null_as_empty_vec;
 
-        #[allow(dead_code)]
         #[derive(serde::Deserialize, Debug)]
         struct Delta {
-            content: Option<String>,
             #[serde(default, deserialize_with = "deserialize_null_as_empty_vec")]
             tool_calls: Vec<super::DeltaToolCall>,
         }
@@ -2977,10 +2919,6 @@ mod tests {
     #[test]
     fn local_routing_prefix_strips_only_escape_hatch() {
         assert_eq!(
-            super::strip_routing_prefix("local/Qwen/Qwen3.6-27B-FP8"),
-            "Qwen/Qwen3.6-27B-FP8"
-        );
-        assert_eq!(
             super::wire_model_for_base_url(
                 "local/Qwen/Qwen3.6-27B-FP8",
                 OpenAiCompatConfig::openai(),
@@ -3027,13 +2965,5 @@ mod tests {
         ); // 100MB
         assert_eq!(OpenAiCompatConfig::xai().max_request_body_bytes, 52_428_800);
         // 50MB
-    }
-
-    #[test]
-    fn strip_routing_prefix_strips_kimi_provider_prefix() {
-        // US-023: kimi prefix should be stripped for wire format
-        assert_eq!(super::strip_routing_prefix("kimi/kimi-k2.5"), "kimi-k2.5");
-        assert_eq!(super::strip_routing_prefix("kimi-k2.5"), "kimi-k2.5"); // no prefix, unchanged
-        assert_eq!(super::strip_routing_prefix("kimi/kimi-k1.5"), "kimi-k1.5");
     }
 }
