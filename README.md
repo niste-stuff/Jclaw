@@ -277,6 +277,11 @@ behalf — see [Agent-initiated switching](#11-how-it-works) below).
 | review-structure | yes | Swarm lens: structural correctness and token economics (uses the `tokenize` tool). |
 | **draft-swarm** | no | Generates several distinct creative takes on a single card section (not a whole card) in parallel, then presents them for you to pick or modify before moving on. Trigger with `/takes`. |
 | section-draft | yes | draft-swarm's worker: writes one variant of one section, given a specific creative angle. |
+| **forensics-swarm** | no | Forensic (not quality) pass: fans any handed text — your own draft or a foreign/pasted card — out to all 4 lenses below, every run, in parallel, then merges their findings under one heading each. Checks for AI-generation artifacts and statistical signatures, not "is this good." Trigger with `/forensics`. |
+| forensics-entropy | yes | Forensics lens: entropy / repetition / vocabulary statistics (`text_entropy` tool). Emits a 0-100 `slop-risk` score. |
+| forensics-fingerprint | yes | Forensics lens: punctuation, function-word, and word-length stylistic fingerprint (`text_fingerprint` tool). Emits a 0-100 `slop-risk` score; never issues an "AI wrote this" verdict. |
+| forensics-ghost | yes | Forensics lens: ghost content — assistant-mode/essay-mode leakage via `ghost_phrase_scan` plus its own read. Emits a 0-100 `slop-risk` score from ghost-phrase density. |
+| forensics-bias | yes | Forensics lens: hidden bias / default-pattern observations. Pure judgment, no tool, qualitative-only (no score by design). |
 | voice-profiler | yes | Extracts a specific creator's box-formatting conventions, macro/pronoun habits, and prose register from sample cards handed to it inline, and returns a reusable profile document — never quotes samples at length, never authors content. Spawned by `build` via `/voice add`. |
 | **general** | no | General-purpose research/multi-step execution helper. |
 | **explore** | no | Fast, read-only codebase/file explorer (file search, grep, architecture questions). |
@@ -303,6 +308,7 @@ Type `/` in the composer, or open the command palette with `ctrl+p`.
 | `/contradictions` | `/contradict` | Scans the current card for internal inconsistencies. Stays on the current agent — a manual, on-demand deep-dive. |
 | `/swarm` | `/deepreview` | Fans the current draft out to whichever of `review-swarm`'s 4 lenses apply and shows the merged findings in full (not condensed). |
 | `/takes` | `/draftswarm` | Fans out 3 distinct-angle takes on a single card section (not the whole card) via `draft-swarm` and shows them for you to pick or modify — stays on the current agent. |
+| `/forensics` | | Runs a forensic pass (`forensics-swarm`) on the pasted/attached text or current card: entropy, stylistic fingerprint, ghost content, and bias lenses. Three lenses each report a 0-100 `slop-risk` score (higher = more mechanical-reading); the scores are hedged signals for tracking a card's drift across revisions, never a pass/fail verdict, and are deliberately not summed into one number. |
 | `/evolve` | `/refine` | Loops draft → review → auto-fix for up to N generations (default 3, e.g. `/evolve 5`) — fully unattended, ends with one summary line. Stays on the current agent. |
 | `/lorebook` | `/worldinfo` | Prefills a propose-then-confirm lorebook-authoring prompt for the current card, switches to `peak`. |
 | `/ideas` | `/brainstorm` | Switches to `lore planning`, asks for a topic, then generates 5 distinct idea concepts (deliberately varied angle/tone/twist, not five reskins of one archetype). Presents them via a single-select ("expand now") plus multi-select ("save for later") question — an expand pick hands off to `peak`; saved picks land under `ideas/` in your lore library. |
