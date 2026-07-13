@@ -39,11 +39,13 @@ and many sessions:
   transcript — one rule that looked fine on paper turned out not to fire at
   all until it was rewritten with an explicit mechanical trigger, which is
   exactly the kind of gap a prompt alone won't catch itself.
+  
 - **Separation of authoring and critique.** `review` and `review-swarm` run
   as genuinely separate subagent calls, not the same conversation asking
   itself "is this good?" A model grading its own in-context output tends to
   rubber-stamp it; a critic that only ever sees the finished draft, with a
   narrower rubric, catches more.
+  
 - **Specialist lenses fanned out in parallel, chosen per draft.** `/swarm`
   runs whichever of four critics actually apply to what you handed it —
   prose/AI-tells and structure/token economics by default, lore/cascade
@@ -52,13 +54,16 @@ and many sessions:
   findings and states up front which lenses ran or were skipped and why. One
   model juggling every rubric at once, including ones that don't apply, tends
   to under-weight the ones that do.
+  
 - **Persistent state across sessions.** A system prompt lives inside one
   chat. jclaw's lore library (`~/.local/share/opencode/jclaw/lore/`) is real
   files on disk: worldbuilding survives after the chat ends and feeds future
   cards, instead of being re-explained or lost when the context resets.
+  
 - **Tool-backed numbers, not eyeballed ones.** `peak`/`build` call a real BPE
   tokenizer (`tokenize`) to check token budgets against actual counts, not a
   model's guess at "this feels long."
+  
 - **Workflow enforced by structure, not by instructions the model has to
   remember.** Brainstorming (`lore planning`), world-authoring
   (`worldsmith`), card-writing (`peak`/`build`), and review are separate
@@ -66,9 +71,11 @@ and many sessions:
   them is code (`plan_enter`, `peak_enter`, `task` calls), not a rule buried in a prompt
   that has to survive a long conversation — and long conversations are
   exactly where instruction-following degrades most.
+  
 - **Real files in, real files out.** Cards and lorebooks are read, written,
   and exported as actual files (`/lore`, `/lore add`, `/export`), not
   copy-pasted in and out of a chat window.
+  
 - **Asks what you want instead of assuming.** A static prompt bakes in one
   fixed idea of what a "good" card is — a mandatory tone, a required
   psychological-depth structure, a fixed dialogue-register spread — and
