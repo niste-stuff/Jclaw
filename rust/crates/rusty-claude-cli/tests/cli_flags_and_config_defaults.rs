@@ -38,6 +38,28 @@ fn status_command_applies_model_and_permission_mode_flags() {
 }
 
 #[test]
+fn jclaw_binary_target_builds_and_dispatches_status() {
+    // `claw` and `jclaw` are separate `[[bin]]` targets sharing `run_cli()`, but
+    // only `claw` had process-spawn coverage — this exercises the compiled
+    // `jclaw` artifact directly, with a non-empty arg so it takes the normal
+    // subcommand path instead of the argv0=="jclaw" no-args TUI launch.
+    let temp_dir = unique_temp_dir("jclaw-binary-status");
+    fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jclaw"))
+        .current_dir(&temp_dir)
+        .arg("status")
+        .output()
+        .expect("jclaw should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("Status"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
 fn resume_flag_loads_a_saved_session_and_dispatches_status() {
     // given
     let temp_dir = unique_temp_dir("resume-status");

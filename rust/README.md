@@ -7,16 +7,16 @@ A high-performance Rust rewrite of the Claw Code CLI agent harness. Built for sp
 ```bash
 # Inspect available commands
 cd rust/
-cargo run -p rusty-claude-cli -- --help
+cargo run -p rusty-claude-cli --bin claw -- --help
 
 # Build the workspace
 cargo build --workspace
 
 # One-shot prompt
-cargo run -p rusty-claude-cli -- prompt "explain this codebase"
+cargo run -p rusty-claude-cli --bin claw -- prompt "explain this codebase"
 
-# JSON output for automation
-cargo run -p rusty-claude-cli -- --output-format json prompt "summarize src/main.rs"
+# JSON output for automation (--bin required: this crate builds two binaries, claw and jclaw)
+cargo run -p rusty-claude-cli --bin claw -- --output-format json prompt "summarize src/lib.rs"
 ```
 
 ## Configuration
@@ -156,7 +156,7 @@ Shorthand prompt mode honors the POSIX `--` end-of-flags separator, so `claw -- 
 The command surface is moving quickly. For the canonical live help text, run:
 
 ```bash
-cargo run -p rusty-claude-cli -- --help
+cargo run -p rusty-claude-cli --bin claw -- --help
 ```
 
 ## Workspace Layout

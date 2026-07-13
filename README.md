@@ -174,8 +174,7 @@ Jclaw/
 │   │   │                     evaluation, prompt assembly
 │   │   ├── commands/         Slash-command definitions for the Rust CLI layer
 │   │   ├── tools/            Rust-side tool implementations, incl.
-│   │   │                     card_tools.rs (card/lorebook validation),
-│   │   │                     lane_completion.rs
+│   │   │                     card_tools.rs (card/lorebook validation)
 │   │   ├── api/               HTTP client layer for LLM providers (SSE
 │   │   │                     streaming, prompt caching, per-provider clients)
 │   │   ├── plugins/          Plugin/hook system for the Rust layer
