@@ -17,6 +17,7 @@ status-help.txt
 tui/HANDOFF.md
 # Superpowers spec scratch files
 docs/superpowers/specs/
+docs/superpowers/plans/
 # Machine-local tool config (shared defaults belonged in CLAUDE.md instead)
 /.claude.json
 /.claw.json
