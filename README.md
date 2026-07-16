@@ -245,6 +245,13 @@ lore library — then hand it to `peak` (`/voice`) to author brand-new,
 original content that closely matches that creator's style without copying
 their actual phrasing.
 
+You don't have to reach for `/lore` or `/voice` yourself, either — naming a
+creator or topic in plain conversation ("use niste's voice for this," "ground
+this in the dragon kingdom lore") is enough. `peak`/`build` search your
+library with a dedicated `library_search` tool and always confirm the match
+with you before reading or using it, even when there's only one candidate; a
+miss gets reported instead of guessed at.
+
 A JanitorAI card has exactly four platform-fixed boxes — **Scenario**,
 **Personality**, **Opening Messages** (up to 10 slots, only one loads per
 chat), and **Example Dialogue** — plus, optionally, an attached **lorebook**
@@ -328,6 +335,8 @@ Type `/` in the composer, or open the command palette with `ctrl+p`.
 | `/editor` | — | Open your external `$EDITOR` for composing a longer prompt. |
 | `/clearcontext` | — | Remove attached editor/file context from the composer. |
 | `/skills` | — | List available skills. |
+
+No command needed to search the library by name — see the note at the end of [§3](#3-core-concept-lore-is-the-source-the-card-is-the-render): `peak`/`build` resolve a plain-language reference ("use niste's voice") via `library_search`, always confirmed before use.
 
 ### General / app commands
 
