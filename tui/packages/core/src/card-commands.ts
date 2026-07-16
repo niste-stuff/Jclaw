@@ -74,6 +74,7 @@ export const CARD_COMMAND_REGISTRY: Record<CardCommandId, CardCommandEntry> = {
       "run this through evolve",
       "loop this through review a few times",
       "auto-refine this card",
+      "evolve this card",
     ],
   },
   lore: {

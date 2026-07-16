@@ -76,20 +76,19 @@ describe("bestCommandMatch", () => {
       expect(match?.id).toBe("loreAdd")
     })
 
-    // NOTE: "evolve this card" is also no longer hijacked by the bare "card" slashName
-    // (pre-fix it matched "card"), but it does not resolve to "evolve" either. All of
-    // evolve's registered trigger phrases are 4+ tokens ("run this through evolve",
-    // "loop this through review a few times", "auto-refine this card"), so only 2 of
-    // those tokens overlapping this 3-token query yields ratio 0.5, below MIN_RATIO
-    // (0.6). Meanwhile rewrite's 3-token trigger "rewrite this card" hits 2/3 = 0.667
-    // and wins. This is a distinct, pre-existing scoring-threshold limitation of
-    // evolve's trigger-phrase wording (in card-commands.ts, out of scope for this fix),
-    // not the single-token-hijack bug this change targets. Documented here as a known
-    // follow-up rather than silently asserted as fixed.
-    test('"evolve this card" is no longer hijacked by the bare "card" slashName (though it still resolves to rewrite, a separate known limitation)', () => {
+    // Follow-up fix: "evolve this card" was no longer hijacked by the bare "card"
+    // slashName after the single-token-hijack fix, but it also failed to resolve to
+    // "evolve" itself. All of evolve's registered trigger phrases were 4+ tokens
+    // ("run this through evolve", "loop this through review a few times",
+    // "auto-refine this card"), so only 2 of those tokens overlapping this 3-token
+    // query yielded ratio 0.5, below MIN_RATIO (0.6) — while rewrite's 3-token trigger
+    // "rewrite this card" hit 2/3 = 0.667 and won by default. Fixed by adding the
+    // literal "evolve this card" trigger phrase to evolve's entry in card-commands.ts,
+    // which scores a full 3/3 = 1.0 match.
+    test('"evolve this card" now resolves to evolve, not rewrite', () => {
       const match = bestCommandMatch("evolve this card", CARD_COMMAND_REGISTRY)
       expect(match?.id).not.toBe("card")
-      expect(match?.id).toBe("rewrite")
+      expect(match?.id).toBe("evolve")
     })
   })
 
