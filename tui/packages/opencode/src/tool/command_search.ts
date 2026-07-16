@@ -33,7 +33,7 @@ export function bestCommandMatch(
       const phraseTokens = normalizeForMatch(phrase).split(" ").filter(Boolean)
       if (phraseTokens.length === 0) continue
       const matched = phraseTokens.filter((token) => queryTokens.has(token))
-      if (phraseTokens.length > 1 && matched.length < MIN_MATCHED_TOKENS) continue
+      if (matched.length < MIN_MATCHED_TOKENS) continue
       const ratio = matched.length / phraseTokens.length
       if (ratio < MIN_RATIO) continue
       if (!best || ratio > best.score) {
