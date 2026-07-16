@@ -1,0 +1,20 @@
+Search the lore/voice library for a file matching a plain-language reference — a
+creator name, a lore topic, a world/character name — when the user names it in
+conversation instead of using the /lore or /voice picker or handing you a literal
+path.
+
+Call this only for that specific case. Do not use it as a general workspace
+search tool, and do not fall back to raw `glob`/`read` against the library
+instead of this tool — this is the one sanctioned way to search the library on
+your own initiative.
+
+Matching: filename match first (case-insensitive, punctuation-insensitive). If
+no filename matches, falls back to a content match inside each file. Pass
+`library: "voices"` when the reference is clearly about a creator's voice/style,
+`library: "lore"` when it's clearly about a topic/world/character's lore, or
+omit it (defaults to "any") when you're not sure which.
+
+The result is a list of candidates, never a single resolved file — even one
+candidate still needs user confirmation via the `question` tool before you read
+it or treat it as settled. Zero candidates means report nothing was found and
+ask the user how to proceed (name a path, use the picker, or skip it).
