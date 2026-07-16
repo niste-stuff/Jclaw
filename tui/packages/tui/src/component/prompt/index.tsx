@@ -367,6 +367,9 @@ export function Prompt(props: PromptProps) {
   const SLOP_MODE_REMINDER =
     'Slop mode is ON for this message: skip the content-quality rubric (banned phrases, hook test, anti-cliché, familiar-patterns handling), don\'t auto-spawn a review, and don\'t run evolve/swarm on your own initiative. Write one fast pass. Still keep the schema correct: all four boxes present as asked, macros that actually substitute ({{user}}/{{char}}/pronoun set), and valid lorebook JSON if lore is involved. If I explicitly ask for review, /evolve, or /swarm in this same message, do that instead.'
 
+  const YOLO_MODE_REMINDER =
+    "Permission mode is YOLO for this message: if command_search finds a match for a plain-language request, skip the Yes/No confirmation and execute it directly. (This only applies at the yolo tier — at ask or autoapprove, still confirm before executing.)"
+
   const promptCommands = createMemo(() =>
     [
       {
@@ -1407,6 +1410,17 @@ export function Prompt(props: PromptProps) {
           ]
         : []
 
+    const yoloParts =
+      local.permission.mode === "yolo" && isSlopModeApplicable(agent.name)
+        ? [
+            {
+              type: "text" as const,
+              text: YOLO_MODE_REMINDER,
+              synthetic: true,
+            },
+          ]
+        : []
+
     if (store.mode === "shell") {
       move.startSubmit()
       void sdk.client.session.shell({
@@ -1453,6 +1467,7 @@ export function Prompt(props: PromptProps) {
             parts: [
               ...editorParts,
               ...slopParts,
+              ...yoloParts,
               {
                 type: "text",
                 text: inputText,
