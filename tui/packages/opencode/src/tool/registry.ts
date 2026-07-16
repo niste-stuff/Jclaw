@@ -21,6 +21,7 @@ import { TextEntropyTool } from "./text_entropy"
 import { TextFingerprintTool } from "./text_fingerprint"
 import { GhostPhraseScanTool } from "./ghost_phrase_scan"
 import { LibrarySearchTool } from "./library_search"
+import { CommandSearchTool } from "./command_search"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
@@ -120,6 +121,7 @@ const layer = Layer.effect(
     const textfingerprinttool = yield* TextFingerprintTool
     const ghostphrasescantool = yield* GhostPhraseScanTool
     const librarysearchtool = yield* LibrarySearchTool
+    const commandsearchtool = yield* CommandSearchTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -231,6 +233,7 @@ const layer = Layer.effect(
           textFingerprint: Tool.init(textfingerprinttool),
           ghostPhraseScan: Tool.init(ghostphrasescantool),
           librarySearch: Tool.init(librarysearchtool),
+          commandSearch: Tool.init(commandsearchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
@@ -262,6 +265,7 @@ const layer = Layer.effect(
             tool.textFingerprint,
             tool.ghostPhraseScan,
             tool.librarySearch,
+            tool.commandSearch,
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             tool.plan,
             tool.planEnter,
