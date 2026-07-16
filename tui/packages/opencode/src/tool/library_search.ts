@@ -92,3 +92,53 @@ export function searchContent(
       snippet: buildSnippet(file.content, query),
     }))
 }
+
+import { readFile } from "node:fs/promises"
+import { Effect, Schema } from "effect"
+import * as Tool from "./tool"
+import { Global } from "@opencode-ai/core/global"
+import { Glob } from "@opencode-ai/core/util/glob"
+import DESCRIPTION from "./library_search.txt"
+
+export const Parameters = Schema.Struct({
+  query: Schema.String.annotate({
+    description: "The plain-language reference to search for — a creator name, a lore topic, a world/character name.",
+  }),
+  library: Schema.Literals(["lore", "voices", "any"])
+    .annotate({
+      description:
+        "Narrow the search: 'voices' for a creator's voice profile, 'lore' for a lore/world/character reference, 'any' if unsure (default).",
+      default: "any",
+    })
+    .pipe(Schema.withDecodingDefault(Effect.succeed("any" as const))),
+})
+
+export const LibrarySearchTool = Tool.define(
+  "library_search",
+  Effect.succeed({
+    description: DESCRIPTION,
+    parameters: Parameters,
+    execute: (params: Schema.Schema.Type<typeof Parameters>, _ctx: Tool.Context) =>
+      Effect.gen(function* () {
+        const root = Global.Path.lore
+        const found = yield* Effect.promise(() =>
+          Glob.scan("**/*", { cwd: root, absolute: true, dot: false, symlink: true }),
+        )
+        const files = found.filter((file) => LIBRARY_EXTS.has(path.extname(file).toLowerCase()))
+
+        let candidates = searchFilenames(files, params.query, root, params.library)
+        if (candidates.length === 0) {
+          const withContent = yield* Effect.promise(() =>
+            Promise.all(files.map(async (file) => ({ path: file, content: await readFile(file, "utf-8") }))),
+          )
+          candidates = searchContent(withContent, params.query, root, params.library)
+        }
+
+        return {
+          title: candidates.length === 0 ? "no matches" : `${candidates.length} match(es)`,
+          output: JSON.stringify({ query: params.query, library: params.library, candidates }, null, 2),
+          metadata: { count: candidates.length, candidates },
+        }
+      }).pipe(Effect.orDie),
+  }),
+)
