@@ -150,6 +150,7 @@ const layer = Layer.effect(
           plan_enter: "deny",
           plan_exit: "deny",
           peak_enter: "deny",
+          worldsmith_enter: "deny",
           // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
           read: {
             "*": "allow",
@@ -172,6 +173,7 @@ const layer = Layer.effect(
               Permission.fromConfig({
                 question: "allow",
                 plan_enter: "allow",
+                worldsmith_enter: "allow",
                 external_directory: {
                   [path.join(Global.Path.lore, "*")]: "allow",
                   [LOREBOOK_EXAMPLE_PATH]: "allow",
@@ -221,6 +223,7 @@ const layer = Layer.effect(
               Permission.fromConfig({
                 question: "allow",
                 plan_enter: "allow",
+                worldsmith_enter: "allow",
                 external_directory: {
                   [path.join(Global.Path.lore, "*")]: "allow",
                   [LOREBOOK_EXAMPLE_PATH]: "allow",
