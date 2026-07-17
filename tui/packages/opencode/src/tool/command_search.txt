@@ -1,0 +1,20 @@
+Recognize when the user's plain-language message describes one of the 13
+known Cards-family workflow commands (swarm, evolve, takes, forensics,
+contradictions, lore, lore add, voice, voice add, ideas, world, card,
+rewrite) instead of typing the slash command directly — e.g. "run a review
+swarm on this" instead of typing /swarm.
+
+Call this with the user's raw message as the query. It returns at most one
+best-fit match (or no match) — never a candidate list, unlike library_search.
+
+On a match, confirm with the user before executing (a single Yes/No question
+naming the matched command and what it will do) unless you've been told this
+turn that the permission mode is yolo, in which case skip the confirmation
+and execute directly. Executing means running the same workflow the slash
+command itself would trigger — a task call to the right subagent, the
+evolve loop, plan_enter/worldsmith_enter, or the documented save/browse
+behavior for lore/voice commands — never just acknowledging the match.
+
+Do not call this for messages that are ambiguous small talk or don't
+plausibly describe one of the 13 commands — a "no match" result means
+respond normally, say nothing about this mechanism.

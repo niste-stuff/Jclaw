@@ -1,7 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
-import { PlanExitTool, PlanEnterTool, PeakEnterTool } from "./plan"
+import { PlanExitTool, PlanEnterTool, PeakEnterTool, WorldsmithEnterTool } from "./plan"
 import { Session } from "@/session/session"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
@@ -21,6 +21,7 @@ import { TextEntropyTool } from "./text_entropy"
 import { TextFingerprintTool } from "./text_fingerprint"
 import { GhostPhraseScanTool } from "./ghost_phrase_scan"
 import { LibrarySearchTool } from "./library_search"
+import { CommandSearchTool } from "./command_search"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
@@ -104,6 +105,7 @@ const layer = Layer.effect(
     const plan = yield* PlanExitTool
     const planEnter = yield* PlanEnterTool
     const peakEnter = yield* PeakEnterTool
+    const worldsmithEnter = yield* WorldsmithEnterTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
@@ -120,6 +122,7 @@ const layer = Layer.effect(
     const textfingerprinttool = yield* TextFingerprintTool
     const ghostphrasescantool = yield* GhostPhraseScanTool
     const librarysearchtool = yield* LibrarySearchTool
+    const commandsearchtool = yield* CommandSearchTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -231,11 +234,13 @@ const layer = Layer.effect(
           textFingerprint: Tool.init(textfingerprinttool),
           ghostPhraseScan: Tool.init(ghostphrasescantool),
           librarySearch: Tool.init(librarysearchtool),
+          commandSearch: Tool.init(commandsearchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
           planEnter: Tool.init(planEnter),
           peakEnter: Tool.init(peakEnter),
+          worldsmithEnter: Tool.init(worldsmithEnter),
         })
 
         return {
@@ -262,10 +267,12 @@ const layer = Layer.effect(
             tool.textFingerprint,
             tool.ghostPhraseScan,
             tool.librarySearch,
+            tool.commandSearch,
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             tool.plan,
             tool.planEnter,
             tool.peakEnter,
+            tool.worldsmithEnter,
           ],
           task: tool.task,
           read: tool.read,

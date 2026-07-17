@@ -123,6 +123,7 @@ const appBindingCommands = [
   "terminal.title.toggle",
   "app.toggle.animations",
   "app.toggle.paste_summary",
+  "permission.mode.cycle",
 ] as const
 
 export type TuiInput = {
@@ -827,14 +828,33 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
-        name: "permission.mode",
+        name: "permission.mode.autoapprove",
         title:
-          local.permission.mode === "auto" ? "Disable auto-approve permissions" : "Enable auto-approve permissions",
+          local.permission.mode === "autoapprove" ? "Currently in autoapprove mode" : "Set permission mode: autoapprove",
         slashName: "autoapprove",
-        slashAliases: ["yolo"],
         category: "System",
         run: () => {
-          local.permission.toggle()
+          local.permission.set("autoapprove")
+          dialog.clear()
+        },
+      },
+      {
+        name: "permission.mode.yolo",
+        title: local.permission.mode === "yolo" ? "Currently in yolo mode" : "Set permission mode: yolo",
+        slashName: "yolo",
+        category: "System",
+        run: () => {
+          local.permission.set("yolo")
+          dialog.clear()
+        },
+      },
+      {
+        name: "permission.mode.cycle",
+        title: `Permission mode: ${local.permission.mode}`,
+        slashName: "permissionmode",
+        category: "System",
+        run: () => {
+          local.permission.cycle()
           dialog.clear()
         },
       },

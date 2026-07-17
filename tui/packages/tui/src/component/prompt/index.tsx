@@ -53,6 +53,7 @@ import { DialogLore } from "../dialog-lore"
 import { DialogVoice } from "../dialog-voice"
 import { DialogIdeas } from "../dialog-ideas"
 import { Global } from "@opencode-ai/core/global"
+import { CARD_COMMAND_REGISTRY } from "@opencode-ai/core/card-commands"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../config"
@@ -366,6 +367,9 @@ export function Prompt(props: PromptProps) {
   const SLOP_MODE_REMINDER =
     'Slop mode is ON for this message: skip the content-quality rubric (banned phrases, hook test, anti-cliché, familiar-patterns handling), don\'t auto-spawn a review, and don\'t run evolve/swarm on your own initiative. Write one fast pass. Still keep the schema correct: all four boxes present as asked, macros that actually substitute ({{user}}/{{char}}/pronoun set), and valid lorebook JSON if lore is involved. If I explicitly ask for review, /evolve, or /swarm in this same message, do that instead.'
 
+  const YOLO_MODE_REMINDER =
+    "Permission mode is YOLO for this message: if command_search finds a match for a plain-language request, skip the Yes/No confirmation and execute it directly. (This only applies at the yolo tier — at ask or autoapprove, still confirm before executing.)"
+
   const promptCommands = createMemo(() =>
     [
       {
@@ -569,11 +573,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "New character card",
-        desc: "Scaffold a new card and switch to the peak author",
+        desc: CARD_COMMAND_REGISTRY.card.description,
         name: "card.scaffold",
         category: "Cards",
-        slashName: "card",
-        slashAliases: ["newcard"],
+        slashName: CARD_COMMAND_REGISTRY.card.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.card.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -589,11 +593,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "De-slop rewrite",
-        desc: "Rewrite the current card to cut AI tells and bloat",
+        desc: CARD_COMMAND_REGISTRY.rewrite.description,
         name: "card.rewrite",
         category: "Cards",
-        slashName: "rewrite",
-        slashAliases: ["deslop"],
+        slashName: CARD_COMMAND_REGISTRY.rewrite.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.rewrite.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -607,11 +611,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Find contradictions",
-        desc: "Scan the current card for internal inconsistencies",
+        desc: CARD_COMMAND_REGISTRY.contradictions.description,
         name: "card.contradictions",
         category: "Cards",
-        slashName: "contradictions",
-        slashAliases: ["contradict"],
+        slashName: CARD_COMMAND_REGISTRY.contradictions.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.contradictions.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -624,11 +628,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Draft section variants",
-        desc: "Draft 3 distinct takes on one card section and pick your favorite",
+        desc: CARD_COMMAND_REGISTRY.takes.description,
         name: "card.variants",
         category: "Cards",
-        slashName: "takes",
-        slashAliases: ["draftswarm"],
+        slashName: CARD_COMMAND_REGISTRY.takes.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.takes.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -643,11 +647,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Deep swarm review",
-        desc: "Run a 4-lens audit (prose, lore, macros, structure) on the current card",
+        desc: CARD_COMMAND_REGISTRY.swarm.description,
         name: "card.swarm",
         category: "Cards",
-        slashName: "swarm",
-        slashAliases: ["deepreview"],
+        slashName: CARD_COMMAND_REGISTRY.swarm.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.swarm.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -660,11 +664,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Card forensics",
-        desc: "Deep statistical/bias analysis of a draft or a foreign card — not a quality check",
+        desc: CARD_COMMAND_REGISTRY.forensics.description,
         name: "card.forensics",
         category: "Cards",
-        slashName: "forensics",
-        slashAliases: ["cardforensics"],
+        slashName: CARD_COMMAND_REGISTRY.forensics.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.forensics.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -677,11 +681,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Evolutionary refinement loop",
-        desc: "Loop draft → review → auto-fix for up to N generations, unattended (default 3)",
+        desc: CARD_COMMAND_REGISTRY.evolve.description,
         name: "card.evolve",
         category: "Cards",
-        slashName: "evolve",
-        slashAliases: ["refine"],
+        slashName: CARD_COMMAND_REGISTRY.evolve.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.evolve.slashAliases,
         run: () => {
           fillPrompt(buildEvolvePrompt(DEFAULT_EVOLVE_GENERATIONS))
         },
@@ -708,10 +712,10 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Build card from lore",
-        desc: "Pick lore from your library and build a card grounded in it",
+        desc: CARD_COMMAND_REGISTRY.lore.description,
         name: "card.loreBuild",
         category: "Cards",
-        slashName: "lore",
+        slashName: CARD_COMMAND_REGISTRY.lore.slashName,
         run: () => {
           dialog.replace(() => (
             <DialogLore
@@ -742,11 +746,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Build a world",
-        desc: "Generate a cohesive world and save it to your lore library",
+        desc: CARD_COMMAND_REGISTRY.world.description,
         name: "card.world",
         category: "Cards",
-        slashName: "world",
-        slashAliases: ["worldbuild"],
+        slashName: CARD_COMMAND_REGISTRY.world.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.world.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -762,11 +766,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Add lore to library",
-        desc: "Save lore into your library so you can build cards from it later",
+        desc: CARD_COMMAND_REGISTRY.loreAdd.description,
         name: "card.loreAdd",
         category: "Cards",
-        slashName: "loreadd",
-        slashAliases: ["addlore"],
+        slashName: CARD_COMMAND_REGISTRY.loreAdd.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.loreAdd.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -782,11 +786,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Build a voice profile",
-        desc: "Analyze sample cards and save a reusable voice profile",
+        desc: CARD_COMMAND_REGISTRY.voiceAdd.description,
         name: "card.voiceAdd",
         category: "Cards",
-        slashName: "voiceadd",
-        slashAliases: ["addvoice"],
+        slashName: CARD_COMMAND_REGISTRY.voiceAdd.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.voiceAdd.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -804,10 +808,10 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Author in a saved voice",
-        desc: "Pick a voice profile and write new, original content in that style",
+        desc: CARD_COMMAND_REGISTRY.voice.description,
         name: "card.voice",
         category: "Cards",
-        slashName: "voice",
+        slashName: CARD_COMMAND_REGISTRY.voice.slashName,
         run: () => {
           dialog.replace(() => (
             <DialogVoice
@@ -829,11 +833,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Generate ideas",
-        desc: "Brainstorm distinct idea concepts for a topic, pick one to expand or save for later",
+        desc: CARD_COMMAND_REGISTRY.ideas.description,
         name: "card.ideas",
         category: "Cards",
-        slashName: "ideas",
-        slashAliases: ["brainstorm"],
+        slashName: CARD_COMMAND_REGISTRY.ideas.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.ideas.slashAliases,
         run: () => {
           fillPrompt(
             [
@@ -1406,6 +1410,17 @@ export function Prompt(props: PromptProps) {
           ]
         : []
 
+    const yoloParts =
+      local.permission.mode === "yolo" && isSlopModeApplicable(agent.name)
+        ? [
+            {
+              type: "text" as const,
+              text: YOLO_MODE_REMINDER,
+              synthetic: true,
+            },
+          ]
+        : []
+
     if (store.mode === "shell") {
       move.startSubmit()
       void sdk.client.session.shell({
@@ -1452,6 +1467,7 @@ export function Prompt(props: PromptProps) {
             parts: [
               ...editorParts,
               ...slopParts,
+              ...yoloParts,
               {
                 type: "text",
                 text: inputText,
@@ -1798,8 +1814,11 @@ export function Prompt(props: PromptProps) {
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
                       </text>
-                      <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
+                      <Show when={store.mode === "normal" && local.permission.mode === "autoapprove"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
+                      </Show>
+                      <Show when={store.mode === "normal" && local.permission.mode === "yolo"}>
+                        <text fg={fadeColor(theme.warning, agentMetaAlpha())}>yolo</text>
                       </Show>
                       <Show when={store.mode === "normal" && local.slopMode.enabled}>
                         <text fg={fadeColor(theme.warning, agentMetaAlpha())}>slop</text>

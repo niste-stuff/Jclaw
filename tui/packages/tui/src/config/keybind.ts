@@ -122,6 +122,7 @@ export const Definitions = {
   agent_cycle: keybind("tab", "Next agent"),
   agent_cycle_reverse: keybind("shift+tab", "Previous agent"),
   variant_cycle: keybind("ctrl+t", "Cycle model variants"),
+  permission_mode_cycle: keybind("ctrl+y", "Cycle permission mode (ask/autoapprove/yolo)"),
   variant_list: keybind("none", "List model variants"),
 
   messages_page_up: keybind("pageup,ctrl+alt+b", "Scroll messages up by one page"),
@@ -316,6 +317,7 @@ export const CommandMap = {
   agent_cycle: "agent.cycle",
   agent_cycle_reverse: "agent.cycle.reverse",
   variant_cycle: "variant.cycle",
+  permission_mode_cycle: "permission.mode.cycle",
   variant_list: "variant.list",
   messages_page_up: "session.page.up",
   messages_page_down: "session.page.down",

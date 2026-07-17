@@ -1,0 +1,16 @@
+Use this tool when the user wants to author a whole, internally cohesive
+world (geography, factions, history, characters, rules) rather than a single
+character card, and you're ready to hand off to the worldsmith agent to do
+it.
+
+This tool will ask the user if they want to switch to the worldsmith agent.
+
+Call this tool:
+- When the user asks to build/generate/develop a whole world, setting, or
+  cohesive universe rather than one character
+- When a concept has grown broad enough that it's really worldbuilding, not
+  a single card
+
+Do NOT call this tool:
+- For a single-character card request — that's peak's job, not worldsmith's
+- If the user hasn't indicated they want a whole world, just one character

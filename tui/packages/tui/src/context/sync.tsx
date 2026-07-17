@@ -32,6 +32,15 @@ import { batch, onMount } from "solid-js"
 import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
+import type { PermissionMode } from "./permission"
+
+const AUTOAPPROVE_STILL_ASKS = new Set(["bash", "external_directory", "webfetch", "websearch", "task"])
+
+export function shouldAutoReplyPermission(mode: PermissionMode, permissionCategory: string): boolean {
+  if (mode === "yolo") return true
+  if (mode === "autoapprove") return !AUTOAPPROVE_STILL_ASKS.has(permissionCategory)
+  return false
+}
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -189,7 +198,7 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
-          if (permission.mode === "auto") {
+          if (shouldAutoReplyPermission(permission.mode, request.permission)) {
             void sdk.client.permission.reply({
               requestID: request.id,
               reply: "once",
