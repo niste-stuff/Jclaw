@@ -1153,6 +1153,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             session_reference,
             output_format,
         } => run_compact_command(&session_reference, output_format)?,
+        CliAction::Update { output_format } => run_update_command(output_format)?,
         CliAction::State { output_format } => run_worker_state(output_format)?,
         CliAction::Init { output_format } => run_init(output_format)?,
         // #146: dispatch pure-local introspection. Text mode uses existing
@@ -1253,6 +1254,13 @@ enum CliAction {
     // runtime::trident::trident_compact_session, no LLM call.
     Compact {
         session_reference: String,
+        output_format: CliOutputFormat,
+    },
+    // jclaw update: check niste-stuff/Jclaw releases and update in place
+    // (Windows: download+launch the installer; macOS/Linux: git checkout +
+    // rebuild via scripts/install-jclaw.sh). See docs/superpowers/specs/
+    // 2026-07-18-jclaw-update-command-design.md.
+    Update {
         output_format: CliOutputFormat,
     },
     ResumeSession {
@@ -1958,6 +1966,18 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             session_reference,
             output_format,
         });
+    }
+    // jclaw update: no session/model resolution needed, mirrors the
+    // `compact` subcommand's shape (no positional args expected).
+    if rest.first().map(String::as_str) == Some("update") {
+        let args = &rest[1..];
+        if !args.is_empty() {
+            return Err(format!(
+                "unexpected_extra_args: unexpected update argument(s): {}.\nUsage: jclaw update",
+                args.join(" ")
+            ));
+        }
+        return Ok(CliAction::Update { output_format });
     }
     if let Some(action) = parse_single_word_command_alias(
         &rest,
@@ -2916,6 +2936,7 @@ fn is_known_top_level_subcommand(value: &str) -> bool {
             | "models"
             | "settings"
             | "diff"
+            | "update"
     )
 }
 
@@ -12220,6 +12241,83 @@ fn run_compact_command(
             }))?
         ),
     }
+    Ok(())
+}
+
+fn run_update_command(output_format: CliOutputFormat) -> Result<(), Box<dyn std::error::Error>> {
+    let client = reqwest::blocking::Client::new();
+    let release = update::fetch_latest_release(&client)?;
+
+    match update::compare_versions(VERSION, &release.tag_name)? {
+        update::VersionComparison::UpToDate => {
+            let message = format!(
+                "Already up to date (running {VERSION}, latest is {}).",
+                release.tag_name
+            );
+            match output_format {
+                CliOutputFormat::Text => println!("{message}"),
+                CliOutputFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "kind": "update",
+                        "status": "up_to_date",
+                        "current_version": VERSION,
+                        "latest_tag": release.tag_name,
+                    }))?
+                ),
+            }
+            return Ok(());
+        }
+        update::VersionComparison::UpdateAvailable => {}
+    }
+
+    #[cfg(windows)]
+    {
+        update::run_windows_update(&client, &release)?;
+        let message = format!(
+            "Downloaded {} and launched the installer. Finish the install dialog, then reopen your terminal.",
+            release.tag_name
+        );
+        match output_format {
+            CliOutputFormat::Text => println!("{message}"),
+            CliOutputFormat::Json => println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "kind": "update",
+                    "status": "installer_launched",
+                    "current_version": VERSION,
+                    "latest_tag": release.tag_name,
+                }))?
+            ),
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        let exe_path = std::env::current_exe()?;
+        let repo_root = update::find_repo_root(&exe_path).ok_or(
+            "jclaw update only works when installed via scripts/install-jclaw.sh from a git checkout (no jclaw repo found above the running binary).",
+        )?;
+        update::run_unix_update(&repo_root, &release.tag_name)?;
+        let message = format!(
+            "Updated to {} (detached HEAD at that tag) and rebuilt jclaw.",
+            release.tag_name
+        );
+        match output_format {
+            CliOutputFormat::Text => println!("{message}"),
+            CliOutputFormat::Json => println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "kind": "update",
+                    "status": "updated",
+                    "current_version": VERSION,
+                    "latest_tag": release.tag_name,
+                    "repo_root": repo_root.display().to_string(),
+                }))?
+            ),
+        }
+    }
+
     Ok(())
 }
 
