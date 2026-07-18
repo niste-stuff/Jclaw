@@ -1728,7 +1728,9 @@ title, and the "Open docs" command (opens jclaw's README via `JCLAW_DOCS_URL`).
          feature, caught and fixed while verifying this task.
     - **Verified (every task's implementer + reviewer confirmed independently):** `cargo build
       --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test
-      --workspace` (1,619 passed, 0 failed, repo-wide) all clean; `scripts/fmt.sh --check` clean;
+      --workspace` (1,373 passed, 0 failed, repo-wide — independently reverified at the end of this
+      item's own session, not just trusted from the mid-implementation report that first surfaced
+      this count) all clean; `scripts/fmt.sh --check` clean;
       `update.rs`'s own 13 unit tests, including a genuine bug the implementer caught and fixed in
       a test fixture's hash, independently re-verified via `shasum -a 256`; manual smoke tests
       (real `cargo run --bin jclaw -- update` / `... update --help` / `... help update`, both text
