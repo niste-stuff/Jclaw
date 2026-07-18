@@ -16,6 +16,9 @@ crossterm = "0.28"
 pulldown-cmark = "0.13"
 rustyline = "15"
 runtime = { path = "../runtime" }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+semver = "1"
+sha2 = "0.10"
 plugins = { path = "../plugins" }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
