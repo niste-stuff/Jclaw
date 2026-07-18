@@ -10989,6 +10989,7 @@ fn extract_help_metadata(
             | LocalHelpTopic::SystemPrompt
             | LocalHelpTopic::DumpManifests
             | LocalHelpTopic::BootstrapPlan
+            | LocalHelpTopic::Update
     );
     for line in text.lines() {
         let trimmed = line.trim();

@@ -14,7 +14,12 @@ EXPECTED="${TAG#v}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CARGO_TOML="${JCLAW_CARGO_TOML_OVERRIDE:-$REPO/rust/Cargo.toml}"
 
-ACTUAL="$(grep -m1 '^version = ' "$CARGO_TOML" | sed -E 's/^version = "(.*)"$/\1/')"
+ACTUAL="$(grep -m1 '^version = ' "$CARGO_TOML" | sed -E 's/^version = "(.*)"$/\1/' || true)"
+
+if [ -z "$ACTUAL" ]; then
+  echo "no \"version = \" line found in $CARGO_TOML" >&2
+  exit 1
+fi
 
 if [ "$ACTUAL" != "$EXPECTED" ]; then
   echo "version mismatch: rust/Cargo.toml has \"$ACTUAL\", tag $TAG expects \"$EXPECTED\"" >&2
