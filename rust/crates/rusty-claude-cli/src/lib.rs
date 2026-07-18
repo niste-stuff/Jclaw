@@ -1361,6 +1361,7 @@ enum LocalHelpTopic {
     Model,
     Settings,
     Diff,
+    Update,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1834,6 +1835,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 "resume" => Some(LocalHelpTopic::Resume),
                 "session" => Some(LocalHelpTopic::Session),
                 "compact" => Some(LocalHelpTopic::Compact),
+                "update" => Some(LocalHelpTopic::Update),
                 "--resume" => Some(LocalHelpTopic::Resume),
                 "export" => Some(LocalHelpTopic::Export),
                 "version" => Some(LocalHelpTopic::Version),
@@ -2410,6 +2412,7 @@ fn parse_local_help_action(
         "resume" | "--resume" => LocalHelpTopic::Resume,
         "session" => LocalHelpTopic::Session,
         "compact" => LocalHelpTopic::Compact,
+        "update" => LocalHelpTopic::Update,
         "model" | "models" => LocalHelpTopic::Model,
         "settings" => LocalHelpTopic::Settings,
         _ => return None,
@@ -2475,6 +2478,7 @@ fn parse_single_word_command_alias(
                 "resume" => Some(LocalHelpTopic::Resume),
                 "session" => Some(LocalHelpTopic::Session),
                 "compact" => Some(LocalHelpTopic::Compact),
+                "update" => Some(LocalHelpTopic::Update),
                 "agents" | "agent" => Some(LocalHelpTopic::Agents),
                 "skills" | "skill" => Some(LocalHelpTopic::Skills),
                 "plugins" | "plugin" | "marketplace" => Some(LocalHelpTopic::Plugins),
@@ -2529,6 +2533,7 @@ fn parse_single_word_command_alias(
             "resume" => Some(LocalHelpTopic::Resume),
             "session" => Some(LocalHelpTopic::Session),
             "compact" => Some(LocalHelpTopic::Compact),
+            "update" => Some(LocalHelpTopic::Update),
             "agents" | "agent" => Some(LocalHelpTopic::Agents),
             "skills" | "skill" => Some(LocalHelpTopic::Skills),
             "plugins" | "plugin" | "marketplace" => Some(LocalHelpTopic::Plugins),
@@ -10678,6 +10683,14 @@ fn render_help_topic(topic: LocalHelpTopic) -> String {
   Formats          text (default), json
   Related          claw resume · claw session · /status"
             .to_string(),
+        LocalHelpTopic::Update => "Update
+  Usage            jclaw update [--output-format <format>]
+  Purpose          check niste-stuff/Jclaw releases and update this install in place
+  Windows          downloads the installer for the latest release and launches it, then exits jclaw
+  macOS/Linux      git checkout <tag> + rebuild via scripts/install-jclaw.sh (only works from a git checkout; refuses on a dirty working tree)
+  Formats          text (default), json
+  Related          jclaw --version · jclaw status"
+            .to_string(),
         LocalHelpTopic::Export => "Export
   Usage            claw export [--session <id|latest>] [--output <path>] [--output-format <format>]
   Purpose          serialize a managed session to JSON for review, transfer, or archival
@@ -10789,6 +10802,7 @@ fn local_help_topic_command(topic: LocalHelpTopic) -> &'static str {
         LocalHelpTopic::Model => "models",
         LocalHelpTopic::Settings => "settings",
         LocalHelpTopic::Diff => "diff",
+        LocalHelpTopic::Update => "update",
     }
 }
 
