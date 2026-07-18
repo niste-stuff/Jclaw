@@ -674,7 +674,7 @@ TUI directly.
 | `resume` | Restore/inspect a saved `.claw/` session without starting a new provider turn. |
 | `session` | Manage managed sessions directly: `list` (default), `exists <id>`, `switch <id>`, `fork [branch-name]`, `delete <id> [--force]`. `switch`/`fork` record a pointer so `active` can be used as a session reference anywhere (including `--resume active`). |
 | `compact` | Mechanically trim an existing managed session in place (defaults to `latest`) — same algorithm as the `/compact` slash command, no LLM call. |
-| `jclaw update` | Check `niste-stuff/Jclaw` releases and update this install in place (Windows: downloads + launches the installer; macOS/Linux: `git checkout` + rebuild via `scripts/install-jclaw.sh`, only from a git checkout) |
+| `update` | Check `niste-stuff/Jclaw` releases and update this install in place (Windows: downloads + launches the installer; macOS/Linux: `git checkout` + rebuild via `scripts/install-jclaw.sh`, only from a git checkout) |
 | `config` | Show effective runtime configuration (model, hooks, plugins, env). Read-only. |
 | `model` / `models` | Show model-selection guidance and the current configured model. |
 | `settings` | Alias view of `config settings`. Read-only. |
