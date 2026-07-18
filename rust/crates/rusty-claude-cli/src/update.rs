@@ -92,6 +92,166 @@ pub(crate) fn verify_sha256(data: &[u8], sidecar_contents: &str) -> bool {
     expected_hex == actual_hex
 }
 
+use std::io::Read;
+use std::process::Command;
+
+/// Fetches the newest release (including prereleases — the list endpoint
+/// returns everything, newest first) for `niste-stuff/Jclaw`.
+pub(crate) fn fetch_latest_release(
+    client: &reqwest::blocking::Client,
+) -> Result<ReleaseInfo, String> {
+    let response = client
+        .get(RELEASES_API_URL)
+        .header("User-Agent", "jclaw-update")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|e| format!("failed to reach GitHub releases: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub releases request failed: HTTP {}",
+            response.status()
+        ));
+    }
+
+    // reqwest's `Response::json()` needs the `json` feature, which this
+    // crate doesn't enable (matching `tools`' existing reqwest declaration
+    // in Cargo.toml) — parse via serde_json directly instead.
+    let text = response
+        .text()
+        .map_err(|e| format!("failed to read GitHub releases response: {e}"))?;
+    let body: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("failed to parse GitHub releases response: {e}"))?;
+
+    let releases = body
+        .as_array()
+        .ok_or_else(|| "unexpected GitHub releases response shape (not an array)".to_string())?;
+
+    let latest = releases
+        .iter()
+        .find(|r| r.get("draft").and_then(serde_json::Value::as_bool) != Some(true))
+        .ok_or_else(|| "no non-draft releases found".to_string())?;
+
+    let tag_name = latest
+        .get("tag_name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "release is missing tag_name".to_string())?
+        .to_string();
+
+    let assets = latest
+        .get("assets")
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|a| {
+                    let name = a.get("name")?.as_str()?.to_string();
+                    let download_url = a.get("browser_download_url")?.as_str()?.to_string();
+                    Some(ReleaseAsset { name, download_url })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(ReleaseInfo { tag_name, assets })
+}
+
+/// Downloads `jclaw-setup.exe` + its checksum sidecar, verifies the
+/// checksum, and launches the installer interactively (same UI a manual
+/// double-click goes through — beta.5's `ExtractPayload` `DelTree` fix
+/// already makes re-running it a safe in-place upgrade). Does not wait for
+/// the installer to finish; the caller should exit jclaw immediately after
+/// this returns so the installer can freely overwrite the install dir.
+pub(crate) fn run_windows_update(
+    client: &reqwest::blocking::Client,
+    release: &ReleaseInfo,
+) -> Result<(), String> {
+    let (installer_asset, checksum_asset) = select_windows_assets(&release.assets).ok_or_else(|| {
+        format!(
+            "release {} exists but the Windows installer isn't attached yet — try again shortly.",
+            release.tag_name
+        )
+    })?;
+
+    let installer_bytes = download(client, &installer_asset.download_url)?;
+    let checksum_text = String::from_utf8(download(client, &checksum_asset.download_url)?)
+        .map_err(|e| format!("checksum file is not valid text: {e}"))?;
+
+    if !verify_sha256(&installer_bytes, &checksum_text) {
+        return Err(
+            "downloaded installer failed checksum verification — refusing to run it.".to_string(),
+        );
+    }
+
+    let temp_dir = std::env::temp_dir();
+    let installer_path = temp_dir.join("jclaw-setup.exe");
+    std::fs::write(&installer_path, &installer_bytes)
+        .map_err(|e| format!("failed to write installer to {}: {e}", installer_path.display()))?;
+
+    Command::new(&installer_path)
+        .spawn()
+        .map_err(|e| format!("failed to launch {}: {e}", installer_path.display()))?;
+
+    Ok(())
+}
+
+fn download(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, String> {
+    let mut response = client
+        .get(url)
+        .header("User-Agent", "jclaw-update")
+        .send()
+        .map_err(|e| format!("failed to download {url}: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("download failed: {url} returned HTTP {}", response.status()));
+    }
+    let mut buf = Vec::new();
+    response
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("failed to read response body from {url}: {e}"))?;
+    Ok(buf)
+}
+
+/// Updates a macOS/Linux source checkout to `tag`: refuses on a dirty
+/// working tree, otherwise `git fetch --tags` + `git checkout <tag>`
+/// (detached HEAD — expected, this installs exactly that release), re-syncs
+/// `tui/node_modules` via `bun install` (the new tag may have changed JS
+/// deps, and `node_modules` is git-ignored so checkout alone won't touch
+/// it), then rebuilds + relinks via the existing install script.
+pub(crate) fn run_unix_update(repo_root: &Path, tag: &str) -> Result<(), String> {
+    if crate::git_worktree_is_dirty(repo_root) {
+        return Err(
+            "the jclaw checkout has uncommitted changes — commit or stash them, then run `jclaw update` again.".to_string(),
+        );
+    }
+
+    run_checked(repo_root, "git", &["fetch", "--tags"])?;
+    run_checked(repo_root, "git", &["checkout", tag])?;
+    // `current_dir` alone is enough for `bun install` to target `tui/` — no
+    // need for an extra `--cwd` flag.
+    run_checked(&repo_root.join("tui"), "bun", &["install"])?;
+
+    let install_script = repo_root.join("scripts").join("install-jclaw.sh");
+    let install_script_str = install_script.display().to_string();
+    run_checked(repo_root, "bash", &[install_script_str.as_str()])?;
+
+    Ok(())
+}
+
+fn run_checked(cwd: &Path, program: &str, args: &[&str]) -> Result<(), String> {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("failed to run `{program}`: {e} (is it installed and on PATH?)"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "`{program} {}` failed:\n{}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
