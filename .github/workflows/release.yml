@@ -17,8 +17,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check-version:
+    name: verify version matches tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare rust/Cargo.toml version to the pushed tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: scripts/check-version-matches-tag.sh "${{ github.ref_name }}"
+
   build:
     name: build-${{ matrix.name }}
+    needs: check-version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -85,6 +95,7 @@ jobs:
 
   installer-windows:
     name: windows-installer
+    needs: check-version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
