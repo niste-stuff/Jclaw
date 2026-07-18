@@ -165,12 +165,13 @@ pub(crate) fn run_windows_update(
     client: &reqwest::blocking::Client,
     release: &ReleaseInfo,
 ) -> Result<(), String> {
-    let (installer_asset, checksum_asset) = select_windows_assets(&release.assets).ok_or_else(|| {
-        format!(
+    let (installer_asset, checksum_asset) =
+        select_windows_assets(&release.assets).ok_or_else(|| {
+            format!(
             "release {} exists but the Windows installer isn't attached yet — try again shortly.",
             release.tag_name
         )
-    })?;
+        })?;
 
     let installer_bytes = download(client, &installer_asset.download_url)?;
     let checksum_text = String::from_utf8(download(client, &checksum_asset.download_url)?)
@@ -184,8 +185,12 @@ pub(crate) fn run_windows_update(
 
     let temp_dir = std::env::temp_dir();
     let installer_path = temp_dir.join("jclaw-setup.exe");
-    std::fs::write(&installer_path, &installer_bytes)
-        .map_err(|e| format!("failed to write installer to {}: {e}", installer_path.display()))?;
+    std::fs::write(&installer_path, &installer_bytes).map_err(|e| {
+        format!(
+            "failed to write installer to {}: {e}",
+            installer_path.display()
+        )
+    })?;
 
     Command::new(&installer_path)
         .spawn()
@@ -201,7 +206,10 @@ fn download(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, St
         .send()
         .map_err(|e| format!("failed to download {url}: {e}"))?;
     if !response.status().is_success() {
-        return Err(format!("download failed: {url} returned HTTP {}", response.status()));
+        return Err(format!(
+            "download failed: {url} returned HTTP {}",
+            response.status()
+        ));
     }
     let mut buf = Vec::new();
     response
@@ -303,7 +311,11 @@ mod tests {
         let root = tmp.path();
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::create_dir_all(root.join("rust").join("target").join("release")).unwrap();
-        fs::write(root.join("rust").join("Cargo.toml"), "[workspace.package]\n").unwrap();
+        fs::write(
+            root.join("rust").join("Cargo.toml"),
+            "[workspace.package]\n",
+        )
+        .unwrap();
         let exe_path = root
             .join("rust")
             .join("target")
@@ -330,11 +342,7 @@ mod tests {
         let root = tmp.path();
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::create_dir_all(root.join("some").join("nested").join("dir")).unwrap();
-        let exe_path = root
-            .join("some")
-            .join("nested")
-            .join("dir")
-            .join("jclaw");
+        let exe_path = root.join("some").join("nested").join("dir").join("jclaw");
         fs::write(&exe_path, "").unwrap();
 
         assert_eq!(find_repo_root(&exe_path), None);
