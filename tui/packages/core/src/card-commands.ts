@@ -13,6 +13,7 @@ export type CardCommandId =
   | "voiceAdd"
   | "ideas"
   | "world"
+  | "autopilot"
 
 export interface CardCommandEntry {
   slashName: string
@@ -120,5 +121,11 @@ export const CARD_COMMAND_REGISTRY: Record<CardCommandId, CardCommandEntry> = {
     slashAliases: ["brainstorm"],
     description: "Brainstorm distinct idea concepts for a topic, pick one to expand or save for later",
     triggerPhrases: ["give me some fresh ideas", "brainstorm some concepts", "throw out a few angles for this"],
+  },
+  autopilot: {
+    slashName: "autopilot",
+    slashAliases: ["auto", "quick"],
+    description: "Fast-track card builder using structured inputs and voice selection",
+    triggerPhrases: ["autopilot card creation", "auto card generation", "speed-build a character card"],
   },
 }

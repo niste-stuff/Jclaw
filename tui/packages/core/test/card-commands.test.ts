@@ -3,10 +3,11 @@ import { describe, expect, test } from "bun:test"
 import { CARD_COMMAND_REGISTRY } from "../src/card-commands"
 
 describe("CARD_COMMAND_REGISTRY", () => {
-  test("has exactly the 13 target command ids", () => {
+  test("has exactly the 14 target command ids", () => {
     const ids = Object.keys(CARD_COMMAND_REGISTRY).toSorted()
     expect(ids).toEqual(
       [
+        "autopilot",
         "card",
         "contradictions",
         "evolve",
@@ -46,5 +47,6 @@ describe("CARD_COMMAND_REGISTRY", () => {
     expect(CARD_COMMAND_REGISTRY.voiceAdd.slashName).toBe("voiceadd")
     expect(CARD_COMMAND_REGISTRY.voice.slashName).toBe("voice")
     expect(CARD_COMMAND_REGISTRY.ideas.slashName).toBe("ideas")
+    expect(CARD_COMMAND_REGISTRY.autopilot.slashName).toBe("autopilot")
   })
 })

@@ -1,4 +1,4 @@
-import { afterEach, expect } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 import { createServer, type Server } from "node:http"
 import { streamText } from "ai"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -16,6 +16,16 @@ import { ProviderError } from "@/provider/error"
 
 afterEach(async () => {
   await disposeAllInstances()
+})
+
+test("withChunkTimeoutDefault fills in CHUNK_TIMEOUT_DEFAULT when unset", () => {
+  expect(Provider.withChunkTimeoutDefault({}).chunkTimeout).toBe(Provider.CHUNK_TIMEOUT_DEFAULT)
+  expect(Provider.CHUNK_TIMEOUT_DEFAULT).toBe(120_000)
+})
+
+test("withChunkTimeoutDefault leaves an explicit chunkTimeout (including false) alone", () => {
+  expect(Provider.withChunkTimeoutDefault({ chunkTimeout: 50 }).chunkTimeout).toBe(50)
+  expect(Provider.withChunkTimeoutDefault({ chunkTimeout: false }).chunkTimeout).toBe(false)
 })
 
 const it = testEffect(

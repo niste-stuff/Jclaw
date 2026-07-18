@@ -23,6 +23,11 @@ export interface LanguageEvent {
   language?: LanguageModelV3
 }
 
+// `chunkTimeout` aborts an SSE stream that goes idle (no bytes read) for this long, surfacing
+// a retryable error instead of hanging forever — see wrapSSE below. Every provider built through
+// prepareOptions gets this by default; a provider config can still set `chunkTimeout: false` to opt out.
+export const CHUNK_TIMEOUT_DEFAULT = 120_000
+
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
   if (!res.body) return res
@@ -80,7 +85,7 @@ function prepareOptions(model: ModelV2.Info, pkg: string) {
   if (model.api.type === "aisdk" && model.api.url) options.baseURL = model.api.url
 
   const customFetch = options.fetch
-  const chunkTimeout = options.chunkTimeout
+  const chunkTimeout = options.chunkTimeout === undefined ? CHUNK_TIMEOUT_DEFAULT : options.chunkTimeout
   delete options.chunkTimeout
   options.fetch = async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const opts = { ...(init ?? {}) }

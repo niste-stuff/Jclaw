@@ -554,7 +554,7 @@ const layer = Layer.effect(
           },
           "voice-profiler": {
             name: "voice-profiler",
-            description: `Extracts a creator's writing voice (box-formatting conventions, macro/pronoun habits, prose register) from sample cards handed to it inline, and returns a reusable profile document. Never authors content, never quotes samples at length.`,
+            description: `Extracts a creator's writing voice (box-formatting conventions, macro/pronoun habits, prose register) from sample cards it reads itself from paths it's handed, and returns a reusable profile document. Never authors content, never quotes samples at length.`,
             prompt: PROMPT_VOICE_PROFILER,
             permission: Permission.merge(
               defaults,
@@ -564,6 +564,10 @@ const layer = Layer.effect(
                 grep: "allow",
                 glob: "allow",
                 list: "allow",
+                external_directory: {
+                  "*": "ask",
+                  [path.join(Global.Path.lore, "*")]: "allow",
+                },
               }),
               user,
             ),

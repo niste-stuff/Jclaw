@@ -31,8 +31,19 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { CHUNK_TIMEOUT_DEFAULT } from "@opencode-ai/core/aisdk"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
+// `chunkTimeout` aborts an SSE stream that goes idle (no bytes read) for this long, surfacing
+// a retryable ResponseStreamError instead of hanging forever — see wrapSSE below. Every
+// provider gets this by default; a provider config can still set `chunkTimeout: false` to opt out.
+// Shared with core/aisdk.ts's prepareOptions so the plugin-based provider path gets the same default.
+export { CHUNK_TIMEOUT_DEFAULT }
+
+export function withChunkTimeoutDefault(options: Record<string, any>): Record<string, any> {
+  if (options["chunkTimeout"] !== undefined) return options
+  return { ...options, chunkTimeout: CHUNK_TIMEOUT_DEFAULT }
+}
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
@@ -1639,7 +1650,7 @@ const layer = Layer.effect(
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
       try {
         const provider = s.providers[model.providerID]
-        const options = { ...provider.options }
+        const options = withChunkTimeoutDefault({ ...provider.options })
 
         if (
           model.providerID === "google-vertex" &&

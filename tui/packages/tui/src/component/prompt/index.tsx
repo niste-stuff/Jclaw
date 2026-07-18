@@ -52,6 +52,7 @@ import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { DialogLore } from "../dialog-lore"
 import { DialogVoice } from "../dialog-voice"
 import { DialogIdeas } from "../dialog-ideas"
+import { DialogAutopilot } from "../dialog-autopilot"
 import { Global } from "@opencode-ai/core/global"
 import { CARD_COMMAND_REGISTRY } from "@opencode-ai/core/card-commands"
 import { useArgs } from "../../context/args"
@@ -339,6 +340,21 @@ export function Prompt(props: PromptProps) {
     input.setText(text)
     setStore("prompt", { input: text, parts: [] })
     input.gotoBufferEnd()
+  }
+
+  // Pulls the premise out of a typed `/autopilot <premise>` (or /auto,
+  // /quick) command so the dialog can pre-fill it; returns "" for a bare
+  // slash invocation or a palette-triggered open, which the dialog then
+  // just asks for up front.
+  const extractAutopilotPremise = (raw: string) => {
+    const match = raw.trim().match(/^\/(?:autopilot|auto|quick)(?:\s+([\s\S]+))?$/i)
+    return match?.[1]?.trim() ?? ""
+  }
+
+  const openAutopilot = (premise: string) => {
+    dialog.replace(() => (
+      <DialogAutopilot initialPremise={premise} onGenerate={(prompt, agent) => fillPrompt(prompt, agent)} />
+    ))
   }
 
   const DEFAULT_EVOLVE_GENERATIONS = 3
@@ -796,7 +812,7 @@ export function Prompt(props: PromptProps) {
             [
               "Build a voice profile from sample cards so I can author new cards in this creator's style later.",
               "",
-              "Tell me the creator/voice name to save it under, plus the sample card file paths (or paste the sample text directly) to analyze. Once you have samples, read any file paths yourself, then call the task tool with subagent_type: \"voice-profiler\" and hand it the raw sample text inline — never just the file paths. Take the returned profile and save it to " +
+              'Tell me the creator/voice name to save it under, plus the sample card file paths (or paste the sample text directly) to analyze. Once you have samples, call the task tool with subagent_type: "voice-profiler" and hand it the file paths directly (it reads them itself) — only inline raw text for samples pasted with no backing file, don\'t read the files yourself first. Take the returned profile and save it to ' +
                 path.join(Global.Path.lore, "voices") +
                 "/<name>.md (kebab-case). Ask before overwriting an existing profile, and confirm the path when you're done.",
               "",
@@ -880,6 +896,17 @@ export function Prompt(props: PromptProps) {
               }}
             />
           ))
+        },
+      },
+      {
+        title: "Autopilot card builder",
+        desc: CARD_COMMAND_REGISTRY.autopilot.description,
+        name: "card.autopilot",
+        category: "Cards",
+        slashName: CARD_COMMAND_REGISTRY.autopilot.slashName,
+        slashAliases: CARD_COMMAND_REGISTRY.autopilot.slashAliases,
+        run: () => {
+          openAutopilot(extractAutopilotPremise(store.prompt.input))
         },
       },
       {
@@ -1306,6 +1333,10 @@ export function Prompt(props: PromptProps) {
     const evolveMatch = trimmed.match(/^\/(?:evolve|refine)(?:\s+(\d+))?$/i)
     if (evolveMatch) {
       fillPrompt(buildEvolvePrompt(resolveEvolveGenerations(evolveMatch[1])))
+      return false
+    }
+    if (/^\/(?:autopilot|auto|quick)(?:\s|$)/i.test(trimmed)) {
+      openAutopilot(extractAutopilotPremise(trimmed))
       return false
     }
     const selectedModel = local.model.current()
