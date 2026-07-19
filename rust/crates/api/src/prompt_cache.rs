@@ -167,7 +167,7 @@ impl PromptCache {
             return None;
         }
 
-        let expired = now_unix_secs().saturating_sub(entry.cached_at_unix_secs) >= ttl.as_secs();
+        let expired = now_unix_secs().saturating_sub(entry.cached_at_unix_secs) > ttl.as_secs();
         let mut inner = self.lock();
         inner.stats.last_completion_cache_key = Some(request_hash.clone());
         if expired {
@@ -662,13 +662,16 @@ mod tests {
         std::env::set_var("CLAUDE_CONFIG_HOME", &temp_root);
         let cache = PromptCache::with_config(PromptCacheConfig {
             session_id: "expired-session".to_string(),
-            completion_ttl: Duration::ZERO,
+            completion_ttl: Duration::from_secs(30),
             ..PromptCacheConfig::default()
         });
         let request = sample_request("expire me");
         let response = sample_response(7, 3, "stale");
 
         let _ = cache.record_response(&request, &response);
+
+        // Backdate the entry so its age is strictly greater than the TTL.
+        backdate_completion_entry(&cache, &request, 31);
 
         assert!(cache.lookup_completion(&request).is_none());
         let stats = cache.stats();
@@ -677,6 +680,60 @@ mod tests {
 
         std::fs::remove_dir_all(temp_root).expect("cleanup temp root");
         std::env::remove_var("CLAUDE_CONFIG_HOME");
+    }
+
+    #[test]
+    fn completion_entry_at_exact_ttl_boundary_is_still_reused() {
+        let _guard = test_env_lock();
+        let temp_root = std::env::temp_dir().join(format!(
+            "prompt-cache-boundary-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        std::env::set_var("CLAUDE_CONFIG_HOME", &temp_root);
+        let cache = PromptCache::with_config(PromptCacheConfig {
+            session_id: "boundary-session".to_string(),
+            completion_ttl: Duration::from_secs(30),
+            ..PromptCacheConfig::default()
+        });
+        let request = sample_request("boundary");
+        let response = sample_response(7, 3, "fresh");
+
+        let _ = cache.record_response(&request, &response);
+
+        // Age exactly equal to the TTL must NOT be considered expired.
+        backdate_completion_entry(&cache, &request, 30);
+
+        assert!(
+            cache.lookup_completion(&request).is_some(),
+            "entry at age == ttl must still be reusable"
+        );
+        let stats = cache.stats();
+        assert_eq!(stats.completion_cache_hits, 1);
+
+        std::fs::remove_dir_all(temp_root).expect("cleanup temp root");
+        std::env::remove_var("CLAUDE_CONFIG_HOME");
+    }
+
+    /// Rewrites a persisted completion entry so that its `cached_at_unix_secs`
+    /// timestamp is `age_secs` in the past, making age-based expiry
+    /// deterministic without sleeping.
+    fn backdate_completion_entry(cache: &PromptCache, request: &MessageRequest, age_secs: u64) {
+        let request_hash = request_hash_hex(request);
+        let entry_path = cache.paths().completion_entry_path(&request_hash);
+        let bytes = std::fs::read(&entry_path).expect("entry should exist");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("entry should be valid json");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_secs();
+        value["cached_at_unix_secs"] = serde_json::Value::from(now.saturating_sub(age_secs));
+        std::fs::write(&entry_path, serde_json::to_vec(&value).expect("serialize"))
+            .expect("rewrite entry");
     }
 
     #[test]

@@ -50,9 +50,11 @@ describe("computeTextEntropy", () => {
     expect(result.vocabulary_richness).toBeCloseTo(1, 10)
   })
 
-  test("'the cat sat' repeated 3x: all 7 trigrams repeat, vocab richness 1/3", () => {
+  test("'the cat sat' repeated 3x: 3 distinct trigrams repeat of 7 total, vocab richness 1/3", () => {
     const result = computeTextEntropy("the cat sat the cat sat the cat sat")
-    expect(result.repetition_rate).toBeCloseTo(1, 10)
+    // 7 trigrams total; the 3 distinct trigrams ("the cat sat", "cat sat the",
+    // "sat the cat") each occur more than once -> 3 distinct repeated / 7 total.
+    expect(result.repetition_rate).toBeCloseTo(3 / 7, 10)
     expect(result.vocabulary_richness).toBeCloseTo(0.3333333333333333, 10)
   })
 

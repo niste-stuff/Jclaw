@@ -222,7 +222,9 @@ async fn read_http_request(
         headers.insert(name.to_ascii_lowercase(), value);
     }
 
-    let mut body = remaining[4..].to_vec();
+    // `remaining` starts at the "\r\n\r\n" delimiter; skip it safely so a
+    // delimiter sitting at the buffer end can never panic on the slice.
+    let mut body = remaining.get(4..).unwrap_or(&[]).to_vec();
     while body.len() < content_length {
         let mut chunk = vec![0_u8; content_length - body.len()];
         let read = socket.read(&mut chunk).await?;

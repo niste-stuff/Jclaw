@@ -183,8 +183,10 @@ pub(crate) fn run_windows_update(
         );
     }
 
-    let temp_dir = std::env::temp_dir();
-    let installer_path = temp_dir.join("jclaw-setup.exe");
+    // Write to a unique path per run so concurrent/repeat updates can't
+    // collide and a stale file can't be silently reused. The checksum has
+    // already been verified above, so we only ever write bytes we trust.
+    let installer_path = std::env::temp_dir().join(unique_installer_name());
     std::fs::write(&installer_path, &installer_bytes).map_err(|e| {
         format!(
             "failed to write installer to {}: {e}",
@@ -197,6 +199,18 @@ pub(crate) fn run_windows_update(
         .map_err(|e| format!("failed to launch {}: {e}", installer_path.display()))?;
 
     Ok(())
+}
+
+/// Builds a per-run installer filename that won't collide with a concurrent
+/// or previous update. Combines the process id with a high-resolution
+/// timestamp so two runs on the same machine can't land on the same path,
+/// avoiding reuse of a stale `jclaw-setup.exe`.
+fn unique_installer_name() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("jclaw-setup-{}-{}.exe", std::process::id(), nanos)
 }
 
 fn download(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, String> {

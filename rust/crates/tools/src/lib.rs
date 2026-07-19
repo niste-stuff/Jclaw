@@ -3661,10 +3661,14 @@ fn summarize_web_fetch(
 
 fn extract_title(content: &str, raw_body: &str, content_type: &str) -> Option<String> {
     if content_type.contains("html") {
-        let lowered = raw_body.to_lowercase();
-        if let Some(start) = lowered.find("<title>") {
+        // Match the ASCII `<title>` / `</title>` tags case-insensitively directly
+        // against `raw_body` so the resulting byte offsets stay valid for slicing
+        // `raw_body`. Using a `to_lowercase()` copy would shift byte offsets for
+        // non-ASCII content (e.g. multi-byte lowercasing), producing wrong slices
+        // or panicking on a non-char boundary.
+        if let Some(start) = find_ascii_case_insensitive(raw_body, "<title>") {
             let after = start + "<title>".len();
-            if let Some(end_rel) = lowered[after..].find("</title>") {
+            if let Some(end_rel) = find_ascii_case_insensitive(&raw_body[after..], "</title>") {
                 let title =
                     collapse_whitespace(&decode_html_entities(&raw_body[after..after + end_rel]));
                 if !title.is_empty() {
@@ -3678,6 +3682,31 @@ fn extract_title(content: &str, raw_body: &str, content_type: &str) -> Option<St
         let trimmed = line.trim();
         if !trimmed.is_empty() {
             return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+/// Finds the first occurrence of an ASCII `needle` within `haystack`, ignoring
+/// ASCII case. The returned byte offset is valid for indexing into `haystack`
+/// itself (unlike offsets computed against a `to_lowercase()` copy, which can
+/// diverge for non-ASCII text). `needle` is expected to be ASCII.
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    let hay = haystack.as_bytes();
+    let pat = needle.as_bytes();
+    if pat.is_empty() {
+        return Some(0);
+    }
+    if hay.len() < pat.len() {
+        return None;
+    }
+    for start in 0..=hay.len() - pat.len() {
+        if hay[start..start + pat.len()]
+            .iter()
+            .zip(pat)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        {
+            return Some(start);
         }
     }
     None
@@ -6987,7 +7016,7 @@ mod tests {
     use super::{
         agent_permission_policy, allowed_tools_for_subagent, build_agent_system_prompt,
         classify_lane_failure, derive_agent_state, execute_agent_with_spawn, execute_tool,
-        extract_recovery_outcome, final_assistant_text, global_cron_registry,
+        extract_recovery_outcome, extract_title, final_assistant_text, global_cron_registry,
         maybe_commit_provenance, mvp_tool_specs, permission_mode_from_plugin,
         persist_agent_terminal_state, push_output_block, run_task_packet, AgentInput, AgentJob,
         GlobalToolRegistry, LaneEventName, LaneFailureClass, ProviderRuntimeClient,
@@ -8007,6 +8036,17 @@ mod tests {
         let titled_output: serde_json::Value = serde_json::from_str(&titled).expect("valid json");
         let titled_summary = titled_output["result"].as_str().expect("result string");
         assert!(titled_summary.contains("Title: Ignored"));
+    }
+
+    #[test]
+    fn extract_title_handles_non_ascii_and_preserves_case() {
+        // 'İ' (U+0130) lowercases to two bytes ("i̇"), so offsets computed on a
+        // `to_lowercase()` copy would no longer line up with the original body.
+        // Mixed-case tag names verify the ASCII-case-insensitive match too.
+        let raw = "<html><head><TITLE>İstanbul CAFÉ — Ünïcödé</title></head><body/></html>";
+        let title = extract_title("", raw, "text/html").expect("title should be extracted");
+        // Case is preserved (not lowercased).
+        assert_eq!(title, "İstanbul CAFÉ — Ünïcödé");
     }
 
     #[test]

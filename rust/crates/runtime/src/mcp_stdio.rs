@@ -1243,7 +1243,7 @@ impl McpStdioProcess {
                     "MCP stdio stream closed while reading headers",
                 ));
             }
-            if line == "\r\n" {
+            if line == "\r\n" || line == "\n" {
                 break;
             }
             let header = line.trim_end_matches(['\r', '\n']);

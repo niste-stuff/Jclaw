@@ -43,6 +43,12 @@ pub fn compress_summary(
 
     let normalized = normalize_lines(summary, budget.max_line_chars);
     if normalized.lines.is_empty() || budget.max_chars == 0 || budget.max_lines == 0 {
+        // Trivial early-exit: either there is nothing to compress, or the budget
+        // is degenerate (zero chars/lines) so the selection step never runs. In
+        // both cases no line is dropped *by compression* — the empty output is a
+        // config artifact, not an omission. `omitted_lines` must count lines the
+        // budget-fitting step actually dropped, so it is 0 here. (Lines removed
+        // as duplicates are reported separately via `removed_duplicate_lines`.)
         return SummaryCompressionResult {
             summary: String::new(),
             original_chars,
@@ -50,7 +56,7 @@ pub fn compress_summary(
             original_lines,
             compressed_lines: 0,
             removed_duplicate_lines: normalized.removed_duplicate_lines,
-            omitted_lines: normalized.lines.len(),
+            omitted_lines: 0,
             truncated: original_chars > 0,
         };
     }
@@ -109,14 +115,18 @@ fn normalize_lines(summary: &str, max_line_chars: usize) -> NormalizedSummary {
             continue;
         }
 
-        let truncated = truncate_line(&normalized, max_line_chars);
-        let dedupe_key = dedupe_key(&truncated);
+        // Dedupe on the FULL normalized line, before per-line truncation. Two
+        // distinct lines that only diverge past `max_line_chars` would collapse
+        // to the same truncated prefix and one would be wrongly dropped as a
+        // duplicate. Keying off the pre-truncation line preserves genuinely
+        // distinct lines; the stored line is still truncated for the budget.
+        let dedupe_key = dedupe_key(&normalized);
         if !seen.insert(dedupe_key) {
             removed_duplicate_lines += 1;
             continue;
         }
 
-        lines.push(truncated);
+        lines.push(truncate_line(&normalized, max_line_chars));
     }
 
     NormalizedSummary {
@@ -296,5 +306,86 @@ mod tests {
 
         // then
         assert_eq!(compressed, "Summary:\nA short line.");
+    }
+
+    #[test]
+    fn keeps_lines_that_only_differ_past_the_truncation_boundary() {
+        // Two distinct lines that share the first 160 chars but diverge after.
+        // Before the fix, dedupe keyed off the truncated prefix and dropped one
+        // as a spurious duplicate.
+        let prefix = "x".repeat(200);
+        let line_a = format!("- Note: {prefix} ALPHA");
+        let line_b = format!("- Note: {prefix} BETA");
+        let summary = format!("{line_a}\n{line_b}");
+
+        let result = compress_summary(
+            &summary,
+            SummaryCompressionBudget {
+                max_chars: 10_000,
+                max_lines: 24,
+                max_line_chars: 160,
+            },
+        );
+
+        // Neither line was dropped as a duplicate...
+        assert_eq!(result.removed_duplicate_lines, 0);
+        // ...and both distinct lines survive (as two separate compressed lines).
+        assert_eq!(result.compressed_lines, 2);
+    }
+
+    #[test]
+    fn genuine_duplicates_are_still_removed_after_truncation() {
+        // Two identical long lines must still dedupe to one.
+        let line = format!("- Note: {}", "y".repeat(300));
+        let summary = format!("{line}\n{line}");
+
+        let result = compress_summary(
+            &summary,
+            SummaryCompressionBudget {
+                max_chars: 10_000,
+                max_lines: 24,
+                max_line_chars: 160,
+            },
+        );
+
+        assert_eq!(result.removed_duplicate_lines, 1);
+        assert_eq!(result.compressed_lines, 1);
+    }
+
+    #[test]
+    fn zero_budget_early_exit_reports_no_omitted_lines() {
+        let summary = "- a\n- b\n- c";
+
+        let result = compress_summary(
+            summary,
+            SummaryCompressionBudget {
+                max_chars: 0,
+                max_lines: 24,
+                max_line_chars: 160,
+            },
+        );
+
+        // Degenerate zero-char budget: the selection step never runs, so no
+        // line is dropped *by compression*. omitted_lines must be 0, not the
+        // full line count.
+        assert!(result.summary.is_empty());
+        assert_eq!(result.omitted_lines, 0);
+
+        // Same for a zero max_lines budget.
+        let result_zero_lines = compress_summary(
+            summary,
+            SummaryCompressionBudget {
+                max_chars: 1_200,
+                max_lines: 0,
+                max_line_chars: 160,
+            },
+        );
+        assert_eq!(result_zero_lines.omitted_lines, 0);
+    }
+
+    #[test]
+    fn empty_normalized_input_reports_no_omitted_lines() {
+        let result = compress_summary("   \n  \n", SummaryCompressionBudget::default());
+        assert_eq!(result.omitted_lines, 0);
     }
 }

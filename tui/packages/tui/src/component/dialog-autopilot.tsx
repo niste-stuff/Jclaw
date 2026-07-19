@@ -58,6 +58,7 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
   let settingTextarea: TextareaRenderable | undefined
   let detailTextarea: TextareaRenderable | undefined
   let explanationTextarea: TextareaRenderable | undefined
+  let focusTimer: ReturnType<typeof setTimeout> | undefined
 
   const [store, setStore] = createStore({
     step: "inputs" as Step,
@@ -85,6 +86,15 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
   })
 
   const isLoading = () => store.step === "loading"
+
+  // Fire-and-forget guard for async handlers invoked from keybindings/mouse
+  // handlers: surfaces any otherwise-unhandled rejection into errorText instead
+  // of dropping it as an unhandled promise rejection.
+  function run(promise: Promise<unknown>) {
+    void promise.catch((error) => {
+      setStore("errorText", error instanceof Error ? error.message : "Something went wrong")
+    })
+  }
 
   function voicesToDisplay(): VoiceCandidate[] {
     const list: VoiceCandidate[] = []
@@ -152,7 +162,11 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
         setStore("contradictionText", data.contradiction)
         setStore("step", "contradiction")
         setStore("active", "explanation")
-        setTimeout(() => explanationTextarea?.focus(), 1)
+        if (focusTimer) clearTimeout(focusTimer)
+        focusTimer = setTimeout(() => {
+          focusTimer = undefined
+          explanationTextarea?.focus()
+        }, 1)
         return
       }
       setStore("filledAge", data.filled?.age ?? (store.age === "skip" ? "" : store.age))
@@ -299,7 +313,7 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
   }
 
   async function generateCard() {
-    void cleanupSession()
+    void cleanupSession().catch(() => {})
 
     const voiceInstruction = store.chosenVoicePath
       ? `Use the voice profile at ${store.chosenVoicePath}. Read it first, then closely follow its formatting conventions, macro/pronoun habits, and prose register while writing fully original content — never reuse or lift phrasing from the profile itself, match the pattern, not the text.`
@@ -336,7 +350,9 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
   })
 
   onCleanup(() => {
-    void cleanupSession()
+    if (focusTimer) clearTimeout(focusTimer)
+    focusTimer = undefined
+    void cleanupSession().catch(() => {})
   })
 
   createEffect(() => {
@@ -379,15 +395,15 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
 
   function activateSelection() {
     if (store.step === "inputs") {
-      if (store.active === "submit") void handleSubmit(false)
-      if (store.active === "skipAll") void handleSubmit(true)
+      if (store.active === "submit") run(handleSubmit(false))
+      if (store.active === "skipAll") run(handleSubmit(true))
     } else if (store.step === "contradiction") {
-      if (store.active === "explainSubmit") void handleContradictionSubmit()
+      if (store.active === "explainSubmit") run(handleContradictionSubmit())
     } else if (store.step === "voice_select") {
       const voice = voicesToDisplay()[store.activeVoiceIndex]
       if (voice) pickVoice(voice)
     } else if (store.step === "preview") {
-      void generateCard()
+      run(generateCard())
     }
   }
 
@@ -415,14 +431,14 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
         desc: "Skip all and submit",
         group: "Dialog",
         enabled: () => store.step === "inputs" && !isLoading(),
-        cmd: () => void handleSubmit(true),
+        cmd: () => run(handleSubmit(true)),
       },
       {
         key: "ctrl+enter",
         desc: "Submit",
         group: "Dialog",
         enabled: () => (store.step === "inputs" || store.step === "contradiction") && !isLoading(),
-        cmd: () => (store.step === "inputs" ? void handleSubmit(false) : void handleContradictionSubmit()),
+        cmd: () => (store.step === "inputs" ? run(handleSubmit(false)) : run(handleContradictionSubmit())),
       },
       {
         key: "enter",
@@ -568,7 +584,7 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
               paddingLeft={2}
               paddingRight={2}
               backgroundColor={store.active === "submit" ? theme.primary : theme.backgroundElement}
-              onMouseUp={() => void handleSubmit(false)}
+              onMouseUp={() => run(handleSubmit(false))}
             >
               <text fg={store.active === "submit" ? theme.background : theme.text}>Submit</text>
             </box>
@@ -576,7 +592,7 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
               paddingLeft={2}
               paddingRight={2}
               backgroundColor={store.active === "skipAll" ? theme.primary : theme.backgroundElement}
-              onMouseUp={() => void handleSubmit(true)}
+              onMouseUp={() => run(handleSubmit(true))}
             >
               <text fg={store.active === "skipAll" ? theme.background : theme.text}>Skip All</text>
             </box>
@@ -617,7 +633,7 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
               paddingLeft={2}
               paddingRight={2}
               backgroundColor={store.active === "explainSubmit" ? theme.primary : theme.backgroundElement}
-              onMouseUp={() => void handleContradictionSubmit()}
+              onMouseUp={() => run(handleContradictionSubmit())}
             >
               <text fg={store.active === "explainSubmit" ? theme.background : theme.text}>Submit explanation</text>
             </box>
@@ -713,7 +729,7 @@ export function DialogAutopilot(props: DialogAutopilotProps) {
           </box>
 
           <box flexDirection="row" gap={2}>
-            <box paddingLeft={2} paddingRight={2} backgroundColor={theme.primary} onMouseUp={() => void generateCard()}>
+            <box paddingLeft={2} paddingRight={2} backgroundColor={theme.primary} onMouseUp={() => run(generateCard())}>
               <text fg={theme.background} attributes={TextAttributes.BOLD}>
                 Generate card
               </text>

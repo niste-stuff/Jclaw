@@ -424,10 +424,24 @@ fn parse_rule_matcher(content: &str) -> PermissionRuleMatcher {
 }
 
 fn unescape_rule_content(content: &str) -> String {
-    content
-        .replace(r"\(", "(")
-        .replace(r"\)", ")")
-        .replace(r"\\", r"\")
+    // Single left-to-right pass so escape sequences don't interfere with each
+    // other. A sequential `replace(r"\(", ...)` then `replace(r"\\", ...)` is
+    // wrong: for input `\\(` the `\(` replacement fires on the second backslash
+    // and the escaped `\\` is mangled. Here a backslash always consumes exactly
+    // the next character, emitting it literally.
+    let mut out = String::with_capacity(content.len());
+    let mut chars = content.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some(next) => out.push(next),
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn find_first_unescaped(value: &str, needle: char) -> Option<usize> {
@@ -730,5 +744,24 @@ mod tests {
             prompter.seen[0].reason.as_deref(),
             Some("hook requested confirmation")
         );
+    }
+
+    #[test]
+    fn unescape_rule_content_handles_escapes_in_order() {
+        use super::unescape_rule_content;
+        // Plain escaped parens.
+        assert_eq!(unescape_rule_content(r"\("), "(");
+        assert_eq!(unescape_rule_content(r"\)"), ")");
+        // Escaped backslash.
+        assert_eq!(unescape_rule_content(r"\\"), r"\");
+        // Regression: an escaped backslash followed by a literal `(` must yield
+        // a backslash + `(`, not just `(`. The old sequential-replace order
+        // mangled this into `(`.
+        assert_eq!(unescape_rule_content(r"\\("), r"\(");
+        assert_eq!(unescape_rule_content(r"\\\("), r"\(");
+        // Escaped backslash followed by an escaped paren.
+        assert_eq!(unescape_rule_content(r"\\\)"), r"\)");
+        // Trailing lone backslash is preserved.
+        assert_eq!(unescape_rule_content(r"foo\"), r"foo\");
     }
 }

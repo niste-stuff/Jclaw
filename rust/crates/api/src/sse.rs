@@ -44,7 +44,13 @@ impl SseParser {
         }
 
         let trailing = std::mem::take(&mut self.buffer);
-        match self.parse_frame_with_context(&String::from_utf8_lossy(&trailing))? {
+        // The trailing buffer may end in the middle of a multibyte UTF-8
+        // sequence if the upstream stream was truncated mid-character. Decode
+        // only up to the last complete UTF-8 boundary so a partial trailing
+        // sequence is not lossily rendered as replacement characters that
+        // would corrupt an otherwise valid final frame.
+        let frame = decode_complete_utf8(&trailing);
+        match self.parse_frame_with_context(&frame)? {
             Some(event) => Ok(vec![event]),
             None => Ok(Vec::new()),
         }
@@ -76,6 +82,33 @@ impl SseParser {
             .collect::<Vec<_>>();
         let frame_len = frame.len().saturating_sub(separator_len);
         Some(String::from_utf8_lossy(&frame[..frame_len]).into_owned())
+    }
+}
+
+/// Decodes the longest valid UTF-8 prefix of `bytes`, discarding a trailing
+/// incomplete multibyte sequence rather than emitting a replacement character
+/// for it. Any interior invalid bytes are still handled lossily so genuinely
+/// malformed input does not silently vanish.
+fn decode_complete_utf8(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(error) => {
+            let valid_up_to = error.valid_up_to();
+            // Bytes before `valid_up_to` are guaranteed valid UTF-8; decode
+            // that prefix losslessly.
+            let mut decoded = std::str::from_utf8(&bytes[..valid_up_to])
+                .expect("valid_up_to marks a valid UTF-8 boundary")
+                .to_string();
+            // `error_len() == None` means the input simply ends with an
+            // incomplete trailing multibyte sequence (a truncated stream): we
+            // drop it rather than emit a replacement character. When
+            // `error_len()` is `Some`, the invalid bytes are interior/genuinely
+            // malformed, so surface the remainder via lossy decoding.
+            if error.error_len().is_some() {
+                decoded.push_str(&String::from_utf8_lossy(&bytes[valid_up_to..]));
+            }
+            decoded
+        }
     }
 }
 
@@ -241,6 +274,62 @@ mod tests {
                     },
                 }
             ))
+        );
+    }
+
+    #[test]
+    fn multibyte_char_split_across_chunks_is_not_corrupted() {
+        let mut parser = SseParser::new();
+        // The euro sign U+20AC is 0xE2 0x82 0xAC in UTF-8. Split it so the
+        // first chunk ends mid-character, straddling the chunk boundary.
+        let full = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"\u{20ac}\"}}\n\n";
+        let bytes = full.as_bytes();
+        let split = bytes.len() - 6; // lands inside the euro sign's bytes
+        let (first, second) = bytes.split_at(split);
+
+        assert!(parser.push(first).expect("first chunk buffers").is_empty());
+        let events = parser.push(second).expect("second chunk parses");
+
+        assert_eq!(
+            events,
+            vec![StreamEvent::ContentBlockDelta(
+                crate::types::ContentBlockDeltaEvent {
+                    index: 0,
+                    delta: ContentBlockDelta::TextDelta {
+                        text: "\u{20ac}".to_string(),
+                    },
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn finish_drops_truncated_trailing_multibyte_sequence() {
+        let mut parser = SseParser::new();
+        // A final frame with no terminating blank line, ending mid-multibyte
+        // char (only the first byte of the euro sign). finish() must decode the
+        // valid prefix and not emit a replacement character mid-payload.
+        let mut buf =
+            b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}"
+                .to_vec();
+        buf.push(0xE2); // dangling lead byte of a 3-byte sequence
+
+        assert!(parser
+            .push(&buf)
+            .expect("push buffers incomplete frame")
+            .is_empty());
+        let events = parser.finish().expect("finish parses valid prefix");
+
+        assert_eq!(
+            events,
+            vec![StreamEvent::ContentBlockDelta(
+                crate::types::ContentBlockDeltaEvent {
+                    index: 0,
+                    delta: ContentBlockDelta::TextDelta {
+                        text: "ok".to_string(),
+                    },
+                }
+            )]
         );
     }
 

@@ -2243,7 +2243,7 @@ fn materialize_source(
             let unique = MATERIALIZE_COUNTER.fetch_add(1, Ordering::Relaxed);
             let nanos = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_nanos();
             let destination = temp_root.join(format!("plugin-{nanos}-{unique}"));
             let output = Command::new("git")
@@ -2306,7 +2306,7 @@ fn describe_install_source(source: &PluginInstallSource) -> String {
 fn unix_time_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("time should be after epoch")
+        .unwrap_or_default()
         .as_millis()
 }
 

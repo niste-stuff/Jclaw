@@ -325,6 +325,9 @@ export function Session() {
     } else if (part.tool === "peak_enter") {
       local.agent.set("peak")
       lastSwitch = part.id
+    } else if (part.tool === "worldsmith_enter") {
+      local.agent.set("worldsmith")
+      lastSwitch = part.id
     }
   })
 

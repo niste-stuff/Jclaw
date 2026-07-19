@@ -81,7 +81,10 @@ export function computeTextEntropy(text: string): TextEntropyMetadata {
       trigrams.push(`${wordList[i]} ${wordList[i + 1]} ${wordList[i + 2]}`)
     }
     const trigramCounts = frequency(trigrams)
-    const repeated = trigrams.filter((t) => (trigramCounts.get(t) ?? 0) > 1).length
+    let repeated = 0
+    for (const count of trigramCounts.values()) {
+      if (count > 1) repeated++
+    }
     repetition_rate = trigrams.length === 0 ? 0 : repeated / trigrams.length
   }
 

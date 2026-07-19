@@ -37,12 +37,9 @@ impl PermissionEnforcer {
     /// Check whether a tool can be executed under the current permission policy.
     /// Auto-denies when prompting is required but no prompter is provided.
     pub fn check(&self, tool_name: &str, input: &str) -> EnforcementResult {
-        // When the active mode is Prompt, defer to the caller's interactive
-        // prompt flow rather than hard-denying (the enforcer has no prompter).
-        if self.policy.active_mode() == PermissionMode::Prompt {
-            return EnforcementResult::Allowed;
-        }
-
+        // The enforcer carries no prompter, so delegate to the policy with
+        // `None`. In Prompt mode `authorize` routes through the prompt path and,
+        // absent a prompter, denies rather than silently auto-allowing.
         let outcome = self.policy.authorize(tool_name, input, None);
 
         match outcome {
@@ -73,13 +70,22 @@ impl PermissionEnforcer {
         input: &str,
         required_mode: PermissionMode,
     ) -> EnforcementResult {
-        // When the active mode is Prompt, defer to the caller's interactive
-        // prompt flow rather than hard-denying.
-        if self.policy.active_mode() == PermissionMode::Prompt {
-            return EnforcementResult::Allowed;
-        }
-
         let active_mode = self.policy.active_mode();
+
+        // Prompt mode requires interactive confirmation. The enforcer has no
+        // prompter, so it cannot approve here; deny rather than auto-allow.
+        // (Prompt sorts high in `PermissionMode`, so it must be handled before
+        // the `>=` comparison below, which would otherwise let it pass.)
+        if active_mode == PermissionMode::Prompt {
+            return EnforcementResult::Denied {
+                tool: tool_name.to_owned(),
+                active_mode: active_mode.as_str().to_owned(),
+                required_mode: required_mode.as_str().to_owned(),
+                reason: format!(
+                    "'{tool_name}' with input '{input}' requires confirmation in prompt mode"
+                ),
+            };
+        }
 
         // Check if active mode meets the dynamically determined required mode
         if active_mode >= required_mode {
@@ -422,6 +428,37 @@ mod tests {
         assert!(matches!(result, EnforcementResult::Denied { .. }));
 
         let result = enforcer.check_file_write("/workspace/file.rs", "/workspace");
+        assert!(matches!(result, EnforcementResult::Denied { .. }));
+    }
+
+    #[test]
+    fn prompt_mode_check_with_required_mode_denies_without_prompter() {
+        // The enforcer has no prompter, so Prompt mode cannot auto-approve here.
+        // (Prompt sorts high in PermissionMode; it must not satisfy the >= check.)
+        let enforcer = make_enforcer(PermissionMode::Prompt);
+        let result =
+            enforcer.check_with_required_mode("bash", "echo test", PermissionMode::ReadOnly);
+        assert!(matches!(result, EnforcementResult::Denied { .. }));
+    }
+
+    #[test]
+    fn prompt_mode_check_still_honors_deny_rules() {
+        // Regression: Prompt mode previously short-circuited to Allowed in
+        // check(), bypassing deny rules entirely. It must now route through the
+        // policy so denials are enforced.
+        use crate::config::RuntimePermissionRuleConfig;
+        let rules = RuntimePermissionRuleConfig::new(
+            Vec::new(),
+            vec!["bash(rm -rf:*)".to_string()],
+            Vec::new(),
+            Vec::new(),
+        );
+        let policy = PermissionPolicy::new(PermissionMode::Prompt)
+            .with_tool_requirement("bash", PermissionMode::DangerFullAccess)
+            .with_permission_rules(&rules);
+        let enforcer = PermissionEnforcer::new(policy);
+
+        let result = enforcer.check("bash", r#"{"command":"rm -rf /tmp/x"}"#);
         assert!(matches!(result, EnforcementResult::Denied { .. }));
     }
 

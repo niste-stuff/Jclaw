@@ -749,11 +749,18 @@ async fn send_message_tracks_unexpected_prompt_cache_breaks() {
     .await;
 
     let request = sample_request(false);
+    // The second call must reach the server so cache-break detection runs on a
+    // real API response. Vary a non-fingerprinted field (`max_tokens`) so the
+    // completion cache key differs (forcing a miss) while the break-detection
+    // fingerprint (model/system/tools/messages) stays identical, yielding the
+    // "stable" unexpected break. This avoids relying on the old TTL boundary
+    // (TTL=0 expiring instantly) to force the miss.
+    let mut second_request = sample_request(false);
+    second_request.max_tokens = request.max_tokens + 1;
     let client = AnthropicClient::new("test-key")
         .with_base_url(server.base_url())
         .with_prompt_cache(PromptCache::with_config(PromptCacheConfig {
             session_id: "break-session".to_string(),
-            completion_ttl: Duration::from_secs(0),
             ..PromptCacheConfig::default()
         }));
 
@@ -762,7 +769,7 @@ async fn send_message_tracks_unexpected_prompt_cache_breaks() {
         .await
         .expect("first response should succeed");
     client
-        .send_message(&request)
+        .send_message(&second_request)
         .await
         .expect("second response should succeed");
 
