@@ -1,9 +1,8 @@
-import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
+import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
-import { createResource, createSignal } from "solid-js"
 import { Global } from "@opencode-ai/core/global"
-import { Glob } from "@opencode-ai/core/util/glob"
 import { useTheme } from "../context/theme"
+import { createLibraryScan, createMarkedSelection, libraryOptions } from "./library-picker"
 import path from "node:path"
 
 export interface IdeaPick {
@@ -18,31 +17,14 @@ const IDEAS_DIR = path.join(Global.Path.lore, "ideas")
 // Same multi-select-to-act pattern as dialog-lore.tsx: space marks an idea,
 // enter builds from all marked (falling back to the highlighted one if none
 // are marked). Stays dumb — hands the chosen absolute paths back via onPick.
+// Shares the scan / filter / group plumbing with the other two pickers via
+// library-picker; unlike lore/voice, every idea groups flat under "Ideas".
 export function DialogIdeas(props: { onPick: (picks: IdeaPick[]) => void }) {
   const dialog = useDialog()
   const { theme } = useTheme()
-  const [marked, setMarked] = createSignal<Set<string>>(new Set())
+  const selection = createMarkedSelection()
 
-  const [files] = createResource(async () => {
-    const found = await Glob.scan("**/*", {
-      cwd: IDEAS_DIR,
-      absolute: true,
-      dot: false,
-      symlink: true,
-    })
-    return found
-      .filter((file) => IDEAS_EXTS.has(path.extname(file).toLowerCase()))
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-  })
-
-  function toggle(file: string) {
-    setMarked((prev) => {
-      const next = new Set(prev)
-      if (next.has(file)) next.delete(file)
-      else next.add(file)
-      return next
-    })
-  }
+  const [files] = createLibraryScan({ dir: IDEAS_DIR, exts: IDEAS_EXTS })
 
   function confirm(paths: string[]) {
     if (paths.length === 0) return
@@ -50,28 +32,16 @@ export function DialogIdeas(props: { onPick: (picks: IdeaPick[]) => void }) {
     dialog.clear()
   }
 
-  const options = (): DialogSelectOption<string>[] => {
-    if (files.loading) return [{ title: "Loading…", value: "", disabled: true }]
-    const found = files() ?? []
-    if (found.length === 0)
-      return [
-        {
-          title: "No saved ideas yet — generate some with /ideas:",
-          value: "",
-          disabled: true,
-          description: IDEAS_DIR,
-        },
-      ]
-    return found.map((file) => {
-      const isMarked = marked().has(file)
-      return {
-        title: path.basename(file),
-        value: file,
-        category: "Ideas",
-        gutter: () => <text fg={isMarked ? theme.primary : theme.textMuted}>{isMarked ? "[x]" : "[ ]"}</text>,
-      }
+  const options = () =>
+    libraryOptions({
+      files,
+      dir: IDEAS_DIR,
+      rootCategory: "Ideas",
+      emptyTitle: "No saved ideas yet — generate some with /ideas:",
+      emptyDescription: IDEAS_DIR,
+      flatCategory: true,
+      gutter: selection.gutter,
     })
-  }
 
   return (
     <DialogSelect
@@ -83,19 +53,19 @@ export function DialogIdeas(props: { onPick: (picks: IdeaPick[]) => void }) {
           title: "mark",
           onTrigger: (option) => {
             if (!option.value) return
-            toggle(option.value)
+            selection.toggle(option.value)
           },
         },
       ]}
       footer={
-        marked().size > 0 ? (
+        selection.marked().size > 0 ? (
           <text fg={theme.textMuted}>
-            {marked().size} marked — enter to build from all, space to toggle
+            {selection.marked().size} marked — enter to build from all, space to toggle
           </text>
         ) : undefined
       }
       onSelect={(option) => {
-        const picked = marked()
+        const picked = selection.marked()
         if (picked.size > 0) {
           confirm(Array.from(picked))
           return

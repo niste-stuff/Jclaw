@@ -1,9 +1,8 @@
-import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
+import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
-import { createResource, createSignal } from "solid-js"
 import { Global } from "@opencode-ai/core/global"
-import { Glob } from "@opencode-ai/core/util/glob"
 import { useTheme } from "../context/theme"
+import { createLibraryScan, createMarkedSelection, libraryOptions } from "./library-picker"
 import path from "node:path"
 
 export interface LorePick {
@@ -18,32 +17,14 @@ const LORE_EXTS = new Set([".md", ".txt", ".json"])
 // so a card build can be grounded in more than one lore file at once; Enter
 // with no marks falls back to picking just the highlighted item. Stays dumb
 // otherwise: it only lists files and hands the chosen absolute paths back
-// via onPick — the prompt component owns what happens next.
+// via onPick — the prompt component owns what happens next. Shares the scan /
+// filter / group plumbing with dialog-voice + dialog-ideas via library-picker.
 export function DialogLore(props: { onPick: (picks: LorePick[]) => void }) {
   const dialog = useDialog()
   const { theme } = useTheme()
-  const [marked, setMarked] = createSignal<Set<string>>(new Set())
+  const selection = createMarkedSelection()
 
-  const [files] = createResource(async () => {
-    const found = await Glob.scan("**/*", {
-      cwd: Global.Path.lore,
-      absolute: true,
-      dot: false,
-      symlink: true,
-    })
-    return found
-      .filter((file) => LORE_EXTS.has(path.extname(file).toLowerCase()))
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-  })
-
-  function toggle(file: string) {
-    setMarked((prev) => {
-      const next = new Set(prev)
-      if (next.has(file)) next.delete(file)
-      else next.add(file)
-      return next
-    })
-  }
+  const [files] = createLibraryScan({ dir: Global.Path.lore, exts: LORE_EXTS })
 
   function confirm(paths: string[]) {
     if (paths.length === 0) return
@@ -51,30 +32,15 @@ export function DialogLore(props: { onPick: (picks: LorePick[]) => void }) {
     dialog.clear()
   }
 
-  const options = (): DialogSelectOption<string>[] => {
-    if (files.loading) return [{ title: "Loading…", value: "", disabled: true }]
-    const found = files() ?? []
-    if (found.length === 0)
-      return [
-        {
-          title: "No lore yet — drop .md / .txt / .json files here:",
-          value: "",
-          disabled: true,
-          description: Global.Path.lore,
-        },
-      ]
-    return found.map((file) => {
-      const rel = path.relative(Global.Path.lore, file)
-      const dir = path.dirname(rel)
-      const isMarked = marked().has(file)
-      return {
-        title: path.basename(file),
-        value: file,
-        category: dir === "." ? "Lore" : dir,
-        gutter: () => <text fg={isMarked ? theme.primary : theme.textMuted}>{isMarked ? "[x]" : "[ ]"}</text>,
-      }
+  const options = () =>
+    libraryOptions({
+      files,
+      dir: Global.Path.lore,
+      rootCategory: "Lore",
+      emptyTitle: "No lore yet — drop .md / .txt / .json files here:",
+      emptyDescription: Global.Path.lore,
+      gutter: selection.gutter,
     })
-  }
 
   return (
     <DialogSelect
@@ -86,19 +52,19 @@ export function DialogLore(props: { onPick: (picks: LorePick[]) => void }) {
           title: "mark",
           onTrigger: (option) => {
             if (!option.value) return
-            toggle(option.value)
+            selection.toggle(option.value)
           },
         },
       ]}
       footer={
-        marked().size > 0 ? (
+        selection.marked().size > 0 ? (
           <text fg={theme.textMuted}>
-            {marked().size} marked — enter to build from all, space to toggle
+            {selection.marked().size} marked — enter to build from all, space to toggle
           </text>
         ) : undefined
       }
       onSelect={(option) => {
-        const picked = marked()
+        const picked = selection.marked()
         if (picked.size > 0) {
           confirm(Array.from(picked))
           return

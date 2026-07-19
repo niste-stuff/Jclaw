@@ -2,13 +2,9 @@ import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
 import { CARD_COMMAND_REGISTRY, type CardCommandId, type CardCommandEntry } from "@opencode-ai/core/card-commands"
 import DESCRIPTION from "./command_search.txt"
+import { normalizeForMatch } from "./match-util"
 
-export function normalizeForMatch(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-}
+export { normalizeForMatch }
 
 export interface CommandMatch {
   id: CardCommandId

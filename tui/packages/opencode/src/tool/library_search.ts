@@ -1,4 +1,7 @@
 import path from "path"
+import { normalizeForMatch } from "./match-util"
+
+export { normalizeForMatch }
 
 export const LIBRARY_EXTS = new Set([".md", ".txt", ".json"])
 
@@ -10,13 +13,6 @@ export interface LibraryCandidate {
   category: string
   matchType: "filename" | "content"
   snippet?: string
-}
-
-export function normalizeForMatch(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
 }
 
 export function matchesQuery(haystack: string, query: string): boolean {

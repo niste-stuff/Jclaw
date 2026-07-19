@@ -84,6 +84,24 @@ const GeneratedAgent = Schema.Struct({
   systemPrompt: Schema.String,
 })
 
+// Shared permission shape for the read-only review/forensics "lens" subagents:
+// deny everything, then re-allow the read-only toolset (read/grep/glob/list)
+// plus whichever extra stat tool(s) a given lens needs. The "*": "deny" entry
+// is emitted first so the later per-tool "allow" rules win under the ruleset's
+// last-match-wins evaluation (see Permission.evaluate). Only fold blocks that
+// are exactly this deny + read-only core (± flat extra tools) into this helper;
+// blocks with task allow-lists or external_directory globs stay inline.
+function readOnlyLensPermission(...extraAllowTools: string[]): Parameters<typeof Permission.fromConfig>[0] {
+  return {
+    "*": "deny",
+    read: "allow",
+    grep: "allow",
+    glob: "allow",
+    list: "allow",
+    ...Object.fromEntries(extraAllowTools.map((tool) => [tool, "allow"])),
+  }
+}
+
 export interface Interface {
   readonly get: (agent: string) => Effect.Effect<Info>
   readonly list: () => Effect.Effect<Info[]>
@@ -278,16 +296,7 @@ const layer = Layer.effect(
             prompt: PROMPT_REVIEW,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                read: "allow",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                tokenize: "allow",
-                card_budget: "allow",
-                card_macro_check: "allow",
-              }),
+              Permission.fromConfig(readOnlyLensPermission("tokenize", "card_budget", "card_macro_check")),
               user,
             ),
             options: {},
@@ -298,17 +307,7 @@ const layer = Layer.effect(
             name: "review-prose",
             description: `Review-swarm lens: prose/craft quality and AI-tells. Findings only, no rewrites.`,
             prompt: PROMPT_REVIEW_PROSE,
-            permission: Permission.merge(
-              defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                read: "allow",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-              }),
-              user,
-            ),
+            permission: Permission.merge(defaults, Permission.fromConfig(readOnlyLensPermission()), user),
             options: {},
             mode: "subagent",
             native: true,
@@ -318,17 +317,7 @@ const layer = Layer.effect(
             name: "review-lore",
             description: `Review-swarm lens: cross-box and cross-file lore/lorebook consistency. Findings only, no rewrites.`,
             prompt: PROMPT_REVIEW_LORE,
-            permission: Permission.merge(
-              defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                read: "allow",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-              }),
-              user,
-            ),
+            permission: Permission.merge(defaults, Permission.fromConfig(readOnlyLensPermission()), user),
             options: {},
             mode: "subagent",
             native: true,
@@ -340,14 +329,7 @@ const layer = Layer.effect(
             prompt: PROMPT_REVIEW_MACROS,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                read: "allow",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                card_macro_check: "allow",
-              }),
+              Permission.fromConfig(readOnlyLensPermission("card_macro_check")),
               user,
             ),
             options: {},
@@ -361,15 +343,7 @@ const layer = Layer.effect(
             prompt: PROMPT_REVIEW_STRUCTURE,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                read: "allow",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                tokenize: "allow",
-                card_budget: "allow",
-              }),
+              Permission.fromConfig(readOnlyLensPermission("tokenize", "card_budget")),
               user,
             ),
             options: {},
@@ -409,14 +383,7 @@ const layer = Layer.effect(
             prompt: PROMPT_FORENSICS_ENTROPY,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                read: "allow",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                text_entropy: "allow",
-              }),
+              Permission.fromConfig(readOnlyLensPermission("text_entropy")),
               user,
             ),
             options: {},
@@ -430,14 +397,7 @@ const layer = Layer.effect(
             prompt: PROMPT_FORENSICS_FINGERPRINT,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                read: "allow",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                text_fingerprint: "allow",
-              }),
+              Permission.fromConfig(readOnlyLensPermission("text_fingerprint")),
               user,
             ),
             options: {},
@@ -451,14 +411,7 @@ const layer = Layer.effect(
             prompt: PROMPT_FORENSICS_GHOST,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                read: "allow",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                ghost_phrase_scan: "allow",
-              }),
+              Permission.fromConfig(readOnlyLensPermission("ghost_phrase_scan")),
               user,
             ),
             options: {},
@@ -470,17 +423,7 @@ const layer = Layer.effect(
             name: "forensics-bias",
             description: `Forensics-swarm lens: demographic/stereotype/ideological bias observations, no tool call. Findings only, no rewrites.`,
             prompt: PROMPT_FORENSICS_BIAS,
-            permission: Permission.merge(
-              defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                read: "allow",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-              }),
-              user,
-            ),
+            permission: Permission.merge(defaults, Permission.fromConfig(readOnlyLensPermission()), user),
             options: {},
             mode: "subagent",
             native: true,
