@@ -12,7 +12,6 @@ mod config;
 pub mod config_validate;
 mod conversation;
 mod file_ops;
-pub mod g004_conformance;
 mod git_context;
 pub mod green_contract;
 mod hooks;
@@ -28,7 +27,6 @@ pub mod mcp_tool_bridge;
 mod oauth;
 pub mod permission_enforcer;
 mod permissions;
-pub mod plugin_lifecycle;
 mod policy_engine;
 mod prompt;
 pub mod recovery_recipes;
@@ -121,10 +119,6 @@ pub use oauth::{
 pub use permissions::{
     PermissionContext, PermissionMode, PermissionOutcome, PermissionOverride, PermissionPolicy,
     PermissionPromptDecision, PermissionPrompter, PermissionRequest,
-};
-pub use plugin_lifecycle::{
-    DegradedMode, DiscoveryResult, PluginHealthcheck, PluginLifecycle, PluginLifecycleEvent,
-    PluginState, ResourceInfo, ServerHealth, ServerStatus, ToolInfo,
 };
 pub use policy_engine::{
     evaluate, evaluate_with_events, ApprovalToken, DiffScope, GreenLevel, LaneBlocker, LaneContext,

@@ -15,7 +15,6 @@
     clippy::unused_self
 )]
 mod init;
-mod input;
 mod render;
 mod tui;
 mod update;
