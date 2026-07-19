@@ -7,10 +7,15 @@
 //! pastes them into the bot maker — the file is a workspace format, not
 //! a direct import format.
 //!
+//! The card is the four-box model: **Scenario, Personality (a.k.a.
+//! Description), Opening Messages, Example Dialogue** — and nothing more.
+//! There is no separate Name or Description box; a `# Description` block folds
+//! into Personality.
+//!
 //! Section format:
 //! ```markdown
-//! # Name
-//! Character Name
+//! # Scenario
+//! The situation the roleplay opens in.
 //!
 //! ---
 //!
@@ -25,43 +30,47 @@
 //! ---
 //!
 //! Second opening message...
+//!
+//! ---
+//!
+//! # Example Dialogue
+//! {{char}}: A sample exchange.
 //! ```
 //!
-//! Required: Name, Personality, Opening Messages (1-10 individual messages).
-//! Everything else is optional.
+//! Required for validation: Personality, Opening Messages (1-10 individual
+//! messages). Scenario and Example Dialogue are optional.
+//!
+//! Permanent per-turn budget = **Scenario + Personality only**. Example
+//! Dialogue loads once and rolls off like chat history; only 1 of up to 10
+//! Opening Messages loads. So neither counts toward the permanent budget.
 //!
 //! Token budgets below come from the schema sources recorded in `DECISIONS.md`.
 
 use serde_json::{json, Value};
 
-/// Marker tokens for parsed sections
-const SECTION_NAME: &str = "name";
+/// Marker tokens for parsed sections. The four boxes: Scenario, Personality
+/// (a.k.a. Description), Opening Messages, Example Dialogue.
 const SECTION_PERSONALITY: &str = "personality";
 const SECTION_OPENING_MESSAGES: &str = "opening_messages";
-const SECTION_DESCRIPTION: &str = "description";
 const SECTION_SCENARIO: &str = "scenario";
 const SECTION_EXAMPLE_MESSAGES: &str = "example_messages";
 
 /// Required sections (must be present with non-empty content).
-const REQUIRED_SECTIONS: &[&str] = &[SECTION_NAME, SECTION_PERSONALITY, SECTION_OPENING_MESSAGES];
+const REQUIRED_SECTIONS: &[&str] = &[SECTION_PERSONALITY, SECTION_OPENING_MESSAGES];
 
-/// Optional but recognized sections.
-const OPTIONAL_SECTIONS: &[&str] = &[
-    SECTION_DESCRIPTION,
-    SECTION_SCENARIO,
-    SECTION_EXAMPLE_MESSAGES,
-];
+/// Optional but recognized sections. Description is not here — it is an inbound
+/// label alias that folds into Personality.
+const OPTIONAL_SECTIONS: &[&str] = &[SECTION_SCENARIO, SECTION_EXAMPLE_MESSAGES];
 
-/// Personality under this many estimated tokens suggests low-quality definition.
-const PERSONALITY_LOW_QUALITY: usize = 1000;
-/// Personality in the 1k-4k range is the sweet spot — aim for this.
-const PERSONALITY_TARGET_MAX: usize = 4000;
-/// Personality over this is too much for most use cases; avoid unless user asks.
-const PERSONALITY_TOO_MUCH: usize = 5000;
-/// Permanent definition (personality+scenario+example) sweet spot upper bound.
-const PERMANENT_TARGET_MAX: usize = 5000;
-/// Permanent definition over this is excessive; avoid unless user asks.
-const PERMANENT_TOO_MUCH: usize = 6000;
+/// Permanent (Scenario+Personality) sweet-spot lower bound. Below this is
+/// under-specified. Bands mirror `card_budget.ts`.
+const PERMANENT_SWEET_MIN: usize = 2000;
+/// Permanent sweet-spot upper bound (2k-3k is the only clean band).
+const PERMANENT_SWEET_MAX: usize = 3000;
+/// Permanent above the sweet spot but still acceptable if genuinely lorepacked.
+const PERMANENT_LOREPACKED_MAX: usize = 6000;
+/// Permanent at/above this is bloated territory.
+const PERMANENT_BLOATED_MIN: usize = 7000;
 /// Max opening messages.
 const OPENING_MESSAGES_MAX: usize = 10;
 /// Min opening messages.
@@ -96,12 +105,10 @@ fn normalise_header(raw: &str) -> String {
 /// Known section header slugs and their canonical label.
 fn known_sections() -> Vec<(&'static str, &'static str)> {
     vec![
-        (SECTION_NAME, "Name"),
         (SECTION_PERSONALITY, "Personality"),
         (SECTION_OPENING_MESSAGES, "Opening Messages"),
-        (SECTION_DESCRIPTION, "Description"),
         (SECTION_SCENARIO, "Scenario"),
-        (SECTION_EXAMPLE_MESSAGES, "Example Messages"),
+        (SECTION_EXAMPLE_MESSAGES, "Example Dialogue"),
     ]
 }
 
@@ -232,7 +239,7 @@ fn parse_sections(text: &str) -> Vec<CardSection> {
         sections.push(section);
     }
 
-    sections
+    merge_duplicate_slugs(sections)
 }
 
 /// Remove leading/trailing whitespace and `---` separator lines from a section
@@ -257,9 +264,29 @@ fn clean_section_body(raw: &str) -> String {
     body_lines.join("\n").trim().to_string()
 }
 
-/// Build a CardSection from a header and cleaned body.
+/// Map a canonical header label (as produced by [`object_key_to_header`]) back
+/// to its section slug.
+fn header_label_to_slug(label: &str) -> &'static str {
+    match label {
+        "Personality" => SECTION_PERSONALITY,
+        "Scenario" => SECTION_SCENARIO,
+        "Opening Messages" => SECTION_OPENING_MESSAGES,
+        "Example Dialogue" => SECTION_EXAMPLE_MESSAGES,
+        _ => "",
+    }
+}
+
+/// Build a CardSection from a header and cleaned body. Folds inbound aliases
+/// (e.g. `# Description` → Personality, `mes_example` → Example Dialogue) to
+/// their canonical slug before deciding whether the section is recognised.
 fn build_section(header: &str, body: &str, known: &[(String, &str)]) -> CardSection {
-    let slug = normalise_header(header);
+    let raw_slug = normalise_header(header);
+    // Fold aliases/synonyms to the canonical slug. Unknown headers keep their
+    // raw slug and stay unrecognised.
+    let slug = match object_key_to_header(&raw_slug) {
+        Some(label) => header_label_to_slug(label).to_string(),
+        None => raw_slug,
+    };
     let recognised = known.iter().any(|(k, _)| k == &slug);
 
     let messages = if recognised && slug == SECTION_OPENING_MESSAGES {
@@ -275,6 +302,41 @@ fn build_section(header: &str, body: &str, known: &[(String, &str)]) -> CardSect
         messages,
         recognised,
     }
+}
+
+/// Coalesce multiple sections that share a slug into one, concatenating their
+/// bodies in document order (blank-line join). This honours the four-box merge
+/// rule: a card with both `# Description` and `# Personality` becomes a single
+/// Personality section whose tokens are all counted. Opening Messages are
+/// re-split after the merge. Unrecognised sections are left as-is (a `# Name`
+/// and a `# Notes` block should each still warn independently).
+fn merge_duplicate_slugs(sections: Vec<CardSection>) -> Vec<CardSection> {
+    let mut out: Vec<CardSection> = Vec::new();
+    for section in sections {
+        if !section.recognised {
+            out.push(section);
+            continue;
+        }
+        if let Some(existing) = out
+            .iter_mut()
+            .find(|e| e.recognised && e.slug == section.slug)
+        {
+            if !section.body.is_empty() {
+                if existing.body.is_empty() {
+                    existing.body = section.body;
+                } else {
+                    existing.body.push_str("\n\n");
+                    existing.body.push_str(&section.body);
+                }
+            }
+            if existing.slug == SECTION_OPENING_MESSAGES {
+                existing.messages = split_opening_messages(&existing.body);
+            }
+        } else {
+            out.push(section);
+        }
+    }
+    out
 }
 
 /// Split the Opening Messages body into individual messages on `---` separator
@@ -456,17 +518,17 @@ fn extract_text_input(input: &Value) -> Result<String, String> {
         }
         return Err(
             "`card` object had no recognised fields. Provide one or more of: \
-             name, description, personality, scenario, first_mes (opening messages), \
-             mes_example (example messages) — or pass the card as a single Markdown \
+             personality (or description), scenario, first_mes (opening messages), \
+             mes_example (example dialogue) — or pass the card as a single Markdown \
              string with `# Section` headers."
                 .to_string(),
         );
     }
 
     Err(
-        "`card` must be either a Markdown string (with `# Name`, `# Personality`, and \
-         `# Opening Messages` sections) or a JSON object with card fields \
-         (name, personality, first_mes, ...)."
+        "`card` must be either a Markdown string (with `# Scenario`, `# Personality`, \
+         `# Opening Messages`, `# Example Dialogue` sections) or a JSON object with \
+         card fields (personality, scenario, first_mes, mes_example)."
             .to_string(),
     )
 }
@@ -478,24 +540,25 @@ fn extract_text_input(input: &Value) -> Result<String, String> {
 /// card section (e.g. `tags`).
 fn object_key_to_header(slug: &str) -> Option<&'static str> {
     match slug {
-        "name" => Some("Name"),
-        "description" => Some("Description"),
-        "personality" => Some("Personality"),
+        // Description is an alias/label for the Personality box (four-box model).
+        "personality" | "description" => Some("Personality"),
         "scenario" => Some("Scenario"),
         "first_mes" | "opening_messages" | "opening_message" => Some("Opening Messages"),
-        "mes_example" | "example_messages" | "example_message" => Some("Example Messages"),
+        "mes_example" | "example_messages" | "example_message" | "example_dialogue" => {
+            Some("Example Dialogue")
+        }
+        // Name is no longer a card field: ignore it entirely.
+        "name" => None,
         _ => None,
     }
 }
 
-/// Canonical section order for assembled Markdown.
+/// Canonical section order for assembled Markdown (the four boxes).
 const ASSEMBLY_ORDER: &[&str] = &[
-    "Name",
-    "Description",
-    "Personality",
     "Scenario",
+    "Personality",
     "Opening Messages",
-    "Example Messages",
+    "Example Dialogue",
 ];
 
 /// Render a single field value to body text. Strings pass through; arrays are
@@ -534,7 +597,17 @@ fn assemble_markdown_from_object(obj: &serde_json::Map<String, Value>) -> Option
         if rendered.trim().is_empty() {
             continue;
         }
-        by_header.insert(header, rendered);
+        // Both `description` and `personality` map to header "Personality"; if a
+        // structured object supplies both, concatenate rather than overwrite so
+        // no permanent tokens are silently dropped (mirrors the Markdown-path
+        // merge in parse_sections).
+        by_header
+            .entry(header)
+            .and_modify(|existing| {
+                existing.push_str("\n\n");
+                existing.push_str(&rendered);
+            })
+            .or_insert(rendered);
     }
     if by_header.is_empty() {
         return None;
@@ -546,28 +619,91 @@ fn assemble_markdown_from_object(obj: &serde_json::Map<String, Value>) -> Option
     Some(blocks.join("\n\n---\n\n"))
 }
 
-fn check_placeholders(text: &str, warnings: &mut Vec<String>) {
-    if text.contains("{{ char }}") || text.contains("{{ user }}") {
-        warnings.push(
-            "text contains a spaced placeholder (e.g. `{{ char }}`); Janitor only substitutes `{{char}}` and `{{user}}` (no spaces inside braces)"
-                .to_string(),
-        );
-    }
+/// Double-brace macro names Janitor recognises (mirrors `card_macro_check.ts`:
+/// `{{user}}`, `{{char}}`, and the pronoun case set). Single-brace `{user}` /
+/// `{char}` are a documented valid style and are not flagged.
+const KNOWN_DOUBLE_BRACE: &[&str] = &["user", "char", "sub", "obj", "poss", "ref"];
 
-    // Detect unknown placeholder tokens
+fn check_placeholders(text: &str, warnings: &mut Vec<String>) {
+    // Scan every `{{...}}` occurrence once, classifying spaced vs tight.
     let mut rest = text;
     while let Some(open) = rest.find("{{") {
-        if let Some(close) = rest[open..].find("}}") {
-            let inner = rest[open + 2..open + close].trim();
-            if !inner.is_empty() && inner != "char" && inner != "user" {
+        let after = &rest[open + 2..];
+        if let Some(close) = after.find("}}") {
+            let inner = &after[..close];
+            let trimmed = inner.trim();
+            // Rule 1: spaced double-brace, e.g. `{{ user }}` — not substituted.
+            if !trimmed.is_empty() && (inner != trimmed) {
+                warnings.push(
+                    "spaced placeholder — Janitor only substitutes tight `{{name}}` with no internal spaces"
+                        .to_string(),
+                );
+            } else if !trimmed.is_empty()
+                && trimmed.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
+                && !KNOWN_DOUBLE_BRACE.contains(&trimmed)
+            {
+                // Rule 2: tight double-brace with an unknown name.
                 warnings.push(format!(
-                    "unknown placeholder `{{{{{inner}}}}}`; Janitor recognises only `{{{{char}}}}` and `{{{{user}}}}`"
+                    "unknown placeholder `{{{{{trimmed}}}}}` — Janitor recognises {{{{user}}}}, {{{{char}}}}, {{{{sub}}}}, {{{{obj}}}}, {{{{poss}}}}, {{{{ref}}}}"
                 ));
             }
-            rest = &rest[open + close + 2..];
+            rest = &after[close + 2..];
         } else {
             break;
         }
+    }
+
+    // Rule 4: {{user}}/{user} used somewhere AND the literal "the user" prose
+    // present — a functional bug (that prose won't substitute at runtime).
+    let uses_user_macro = text.contains("{{user}}") || text.contains("{user}");
+    let collapses_to_prose = contains_ignore_ascii_case(text, "the user");
+    if uses_user_macro && collapses_to_prose {
+        warnings.push(
+            "uses the {{user}}/{user} macro elsewhere but also spells out \"the user\" as literal prose — this is a functional bug (that text will not get substituted at runtime), not just a style nit"
+                .to_string(),
+        );
+    }
+}
+
+/// Case-insensitive (ASCII) substring test for a lowercase needle.
+fn contains_ignore_ascii_case(haystack: &str, needle_lower: &str) -> bool {
+    haystack.to_ascii_lowercase().contains(needle_lower)
+}
+
+/// Classify the permanent (Scenario+Personality) token total into one of the
+/// five bands from `card_budget.ts`. Returns the band name and an optional flag
+/// string; the sweet spot (2k-3k) is the only band with no flag.
+fn permanent_band(tokens: usize) -> (&'static str, Option<String>) {
+    if tokens < PERMANENT_SWEET_MIN {
+        (
+            "under_specified",
+            Some(format!(
+                "permanent definition (Scenario+Personality) is ~{tokens} tokens — under the 2k-3k sweet spot, usually means the card is under-specified"
+            )),
+        )
+    } else if tokens <= PERMANENT_SWEET_MAX {
+        ("sweet_spot", None)
+    } else if tokens <= PERMANENT_LOREPACKED_MAX {
+        (
+            "lorepacked_range",
+            Some(format!(
+                "permanent definition is ~{tokens} tokens — above the 2k-3k sweet spot; fine if genuinely lorepacked (dense, non-redundant), otherwise trim or move situational lore to a lorebook"
+            )),
+        )
+    } else if tokens < PERMANENT_BLOATED_MIN {
+        (
+            "approaching_bloat",
+            Some(format!(
+                "permanent definition is ~{tokens} tokens — past the healthy band (especially past 6k); consider proposing a lorebook to offload reference lore"
+            )),
+        )
+    } else {
+        (
+            "bloated",
+            Some(format!(
+                "permanent definition is ~{tokens} tokens — bloated territory (7k+); look for repetition or generic filler, and propose a lorebook for reference lore"
+            )),
+        )
     }
 }
 
@@ -591,16 +727,14 @@ pub fn token_budget_check(input: &Value) -> Result<String, String> {
     let opening_tokens = section_map
         .get(SECTION_OPENING_MESSAGES)
         .map_or(0, |s| estimate_tokens(&s.body));
-    let description_tokens = section_map
-        .get(SECTION_DESCRIPTION)
-        .map_or(0, |s| estimate_tokens(&s.body));
 
-    // Permanent (always-injected) definition tokens.
-    // Description is user-facing and excluded from the permanent budget.
-    let permanent = personality_tokens + scenario_tokens + example_tokens;
+    // Permanent (always-injected) definition = Scenario + Personality only.
+    // Example Dialogue loads once and rolls off like chat history; only 1 of up
+    // to 10 Opening Messages loads. Neither counts toward the permanent budget.
+    let permanent = personality_tokens + scenario_tokens;
 
     let mut flags: Vec<String> = Vec::new();
-    // Quality bands: 0-1k low, 1k-4k sweet spot, 4k-5k above ideal, >5k too much
+
     if personality_tokens == 0 {
         // 0 tokens almost always means the parser found no `# Personality`
         // section, not that the content is short. Say so explicitly so the
@@ -611,32 +745,20 @@ pub fn token_budget_check(input: &Value) -> Result<String, String> {
              correctly before judging the size."
                 .to_string(),
         );
-    } else if personality_tokens < PERSONALITY_LOW_QUALITY {
-        flags.push(format!(
-            "personality ~{personality_tokens} tokens is low quality; avoid unless the user explicitly wants a short card"
-        ));
-    } else if personality_tokens > PERSONALITY_TOO_MUCH {
-        flags.push(format!(
-            "personality ~{personality_tokens} tokens is too much for most use cases; avoid unless the user explicitly requests a verbose card. Aim for 2k-4k tokens"
-        ));
-    } else if personality_tokens > PERSONALITY_TARGET_MAX {
-        flags.push(format!(
-            "personality ~{personality_tokens} tokens is above the ideal 2k-4k range; consider trimming unless the card needs the detail"
-        ));
     }
-    if permanent < PERSONALITY_LOW_QUALITY {
-        flags.push(format!(
-            "permanent definition (personality+scenario+example messages) is ~{permanent} tokens — low quality; avoid unless the user wants minimal cards"
-        ));
-    } else if permanent > PERMANENT_TOO_MUCH {
-        flags.push(format!(
-            "permanent definition (personality+scenario+example messages) is ~{permanent} tokens — excessive for most use cases; avoid unless the user explicitly requests it"
-        ));
-    } else if permanent > PERMANENT_TARGET_MAX {
-        flags.push(format!(
-            "permanent definition (personality+scenario+example messages) is ~{permanent} tokens — above the ideal range; consider trimming"
-        ));
-    }
+
+    // Five-band model on the permanent (Scenario+Personality) total. Skip the
+    // band flag when the whole permanent budget is empty — the not-found flag
+    // above is the actionable one in that case (avoids a confusing double flag).
+    let band = if permanent == 0 {
+        "under_specified"
+    } else {
+        let (band, flag) = permanent_band(permanent);
+        if let Some(flag) = flag {
+            flags.push(flag);
+        }
+        band
+    };
 
     let within_budget = flags.is_empty();
     let report = json!({
@@ -647,15 +769,14 @@ pub fn token_budget_check(input: &Value) -> Result<String, String> {
             "scenario": scenario_tokens,
             "example_messages": example_tokens,
             "opening_messages": opening_tokens,
-            "description": description_tokens,
         },
         "permanent_tokens": permanent,
+        "permanent_band": band,
         "limits": {
-            "personality_low_quality": PERSONALITY_LOW_QUALITY,
-            "personality_target_max": PERSONALITY_TARGET_MAX,
-            "personality_too_much": PERSONALITY_TOO_MUCH,
-            "permanent_target_max": PERMANENT_TARGET_MAX,
-            "permanent_too_much": PERMANENT_TOO_MUCH,
+            "permanent_sweet_min": PERMANENT_SWEET_MIN,
+            "permanent_sweet_max": PERMANENT_SWEET_MAX,
+            "permanent_lorepacked_max": PERMANENT_LOREPACKED_MAX,
+            "permanent_bloated_min": PERMANENT_BLOATED_MIN,
         },
         "flags": flags,
     });
@@ -666,25 +787,17 @@ pub fn token_budget_check(input: &Value) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    // A card in the four-box model: Scenario, Personality, Opening Messages,
+    // Example Dialogue. No `# Name`, no `# Description` box.
     fn good_card_text() -> &'static str {
-        "# Name
-Aria
-
----
-
-# Description
-A short bio for the user. The model never sees this.
+        "# Scenario
+{{user}} meets {{char}} at a quiet cafe tucked behind the library.
 
 ---
 
 # Personality
 {{char}} is warm and witty. {{char}} speaks with a gentle cadence and often
 uses dry humour.
-
----
-
-# Scenario
-{{user}} meets {{char}} at a quiet cafe tucked behind the library.
 
 ---
 
@@ -697,19 +810,14 @@ The door chimes softly as {{user}} enters. {{char}} looks up and smiles.
 
 ---
 
-# Example Messages
+# Example Dialogue
 {{char}}: Tea? Earl Grey, your favourite.
 {{user}}: You remembered.
 {{char}}: (a soft laugh) I remember everything about you."
     }
 
     fn minimal_good_card() -> &'static str {
-        "# Name
-Kai
-
----
-
-# Personality
+        "# Personality
 {{char}} is a quiet observer who speaks in short, deliberate sentences.
 
 ---
@@ -738,29 +846,9 @@ The stars are out tonight. {{char}} gestures at the sky without looking at {{use
     }
 
     #[test]
-    fn missing_name_fails() {
-        let text = "# Personality
-p
-
----
-
-# Opening Messages
-hi";
-        let input = json!({ "card": text });
-        let out = validate_card(&input).unwrap();
-        let v: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["valid"], json!(false));
-        assert!(v["errors"].as_array().unwrap().iter().any(|e| e
-            .as_str()
-            .unwrap()
-            .to_lowercase()
-            .contains("name")));
-    }
-
-    #[test]
     fn missing_personality_fails() {
-        let text = "# Name
-X
+        let text = "# Scenario
+A cafe.
 
 ---
 
@@ -779,12 +867,7 @@ hi";
 
     #[test]
     fn missing_opening_messages_fails() {
-        let text = "# Name
-X
-
----
-
-# Personality
+        let text = "# Personality
 p";
         let input = json!({ "card": text });
         let out = validate_card(&input).unwrap();
@@ -798,12 +881,7 @@ p";
 
     #[test]
     fn too_many_opening_messages_fails() {
-        let mut body = "# Name
-X
-
----
-
-# Personality
+        let mut body = "# Personality
 p
 
 ---
@@ -827,12 +905,7 @@ msg1"
 
     #[test]
     fn empty_opening_messages_fails() {
-        let text = "# Name
-X
-
----
-
-# Personality
+        let text = "# Personality
 p
 
 ---
@@ -850,12 +923,7 @@ p
 
     #[test]
     fn unknown_placeholder_warns() {
-        let text = "# Name
-X
-
----
-
-# Personality
+        let text = "# Personality
 {{persona}} hello
 
 ---
@@ -873,15 +941,107 @@ hi";
     }
 
     #[test]
-    fn token_budget_flags_oversized_personality() {
-        let big = "word ".repeat(5000); // ~6250 est tokens, above 5k too-much threshold
-        let text = format!(
-            "# Name
-X
+    fn macro_pronoun_set_not_flagged() {
+        // The pronoun case-macro set is valid and must NOT warn "unknown".
+        let text = "# Personality
+{{char}} adjusts {{poss}} coat. Ask {{sub}} anything; {{obj}} will answer for {{ref}}.
+
+---
+
+# Opening Messages
+hi";
+        let input = json!({ "card": text });
+        let out = validate_card(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            !v["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w.as_str().unwrap().contains("unknown placeholder")),
+            "pronoun macros must not be flagged: {out}"
+        );
+    }
+
+    #[test]
+    fn single_brace_user_char_valid() {
+        // Single-brace {user}/{char} is a documented valid style — no warning.
+        let text = "# Personality
+{char} is calm and greets {user} warmly.
+
+---
+
+# Opening Messages
+hi";
+        let input = json!({ "card": text });
+        let out = validate_card(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            !v["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w.as_str().unwrap().contains("placeholder")),
+            "single-brace macros must not be flagged: {out}"
+        );
+    }
+
+    #[test]
+    fn user_collapse_flag() {
+        // {{user}} used AND literal "the user" prose present => functional bug.
+        let text = "# Personality
+{{char}} watches the user closely, then greets {{user}} by name.
+
+---
+
+# Opening Messages
+hi";
+        let input = json!({ "card": text });
+        let out = validate_card(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v["warnings"].as_array().unwrap().iter().any(|w| {
+                let s = w.as_str().unwrap();
+                s.contains("the user") || s.contains("functional bug")
+            }),
+            "expected user-collapse warning: {out}"
+        );
+    }
+
+    #[test]
+    fn name_block_is_unrecognized_not_required() {
+        // A `# Name` block no longer errors — it parses as a harmless
+        // unrecognised section, and the card is still valid.
+        let text = "# Name
+Aria
 
 ---
 
 # Personality
+{{char}} is warm.
+
+---
+
+# Opening Messages
+hi";
+        let input = json!({ "card": text });
+        let out = validate_card(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true), "report: {out}");
+        assert!(
+            v["warnings"].as_array().unwrap().iter().any(|w| {
+                let s = w.as_str().unwrap();
+                s.contains("unrecognised") && s.contains("Name")
+            }),
+            "expected unrecognised Name warning: {out}"
+        );
+    }
+
+    #[test]
+    fn token_budget_flags_approaching_bloat() {
+        let big = "word ".repeat(5000); // ~6250 est tokens => approaching_bloat
+        let text = format!(
+            "# Personality
 {big}
 
 ---
@@ -893,72 +1053,24 @@ hi"
         let out = token_budget_check(&input).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["within_budget"], json!(false));
-        assert!(v["flags"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|f| f.as_str().unwrap().contains("too much")));
-    }
-
-    #[test]
-    fn token_budget_passes_small_card() {
-        let input = json!({ "card": good_card_text() });
-        let out = token_budget_check(&input).unwrap();
-        let v: Value = serde_json::from_str(&out).unwrap();
-        // Small cards are flagged as low quality under the new guidance
-        assert_eq!(v["within_budget"], json!(false), "report: {out}");
-        assert!(v["flags"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|f| f.as_str().unwrap().contains("low quality")));
-    }
-
-    #[test]
-    fn token_budget_passes_medium_card() {
-        // A medium-sized personality (1000-4000 tokens) should pass cleanly
-        let medium =
-            "This character has a detailed personality that spans multiple facets. ".repeat(100);
-        let text = format!(
-            "# Name
-X
-
----
-
-# Personality
-{medium}
-
----
-
-# Opening Messages
-Hello there."
+        assert_eq!(
+            v["permanent_band"],
+            json!("approaching_bloat"),
+            "report: {out}"
         );
-        let input = json!({ "card": text });
-        let out = token_budget_check(&input).unwrap();
-        let v: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["within_budget"], json!(true), "report: {out}");
+        assert!(v["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f.as_str().unwrap().contains("past the healthy band")));
     }
 
     #[test]
-    fn token_budget_excludes_description() {
-        // Description is public-facing and should not count toward permanent
-        let big = "word ".repeat(3000);
-        // Personality needs to be >1000 tokens to avoid low-quality flag
-        let medium_personality =
-            "This character is defined by a rich inner world and complex motivations. ".repeat(80);
+    fn token_budget_flags_bloated() {
+        let big = "word ".repeat(6000); // ~7500 est tokens => bloated
         let text = format!(
-            "# Name
-X
-
----
-
-# Description
+            "# Personality
 {big}
-
----
-
-# Personality
-{medium_personality}
 
 ---
 
@@ -968,9 +1080,127 @@ hi"
         let input = json!({ "card": text });
         let out = token_budget_check(&input).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
-        // Description tokens should be reported but permanent should still pass
-        assert!(v["per_section_tokens"]["description"].as_u64().unwrap_or(0) > 500);
+        assert_eq!(v["within_budget"], json!(false));
+        assert_eq!(v["permanent_band"], json!("bloated"), "report: {out}");
+        assert!(v["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f.as_str().unwrap().contains("bloated")));
+    }
+
+    #[test]
+    fn token_budget_flags_under_specified_small_card() {
+        let input = json!({ "card": good_card_text() });
+        let out = token_budget_check(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        // A tiny card is under-specified (below the 2k-3k sweet spot).
+        assert_eq!(v["within_budget"], json!(false), "report: {out}");
+        assert!(v["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f.as_str().unwrap().contains("under-specified")));
+    }
+
+    #[test]
+    fn token_budget_sweet_spot_passes() {
+        // Personality tuned to land in the 2k-3k sweet spot.
+        // ceil(chars/4) tokens; "This character has a detailed inner world. "
+        // is 43 chars => ~250 reps ~= 10750 chars ~= 2688 tokens.
+        let sweet = "This character has a detailed inner world. ".repeat(250);
+        let text = format!(
+            "# Personality
+{sweet}
+
+---
+
+# Opening Messages
+Hello there."
+        );
+        let input = json!({ "card": text });
+        let out = token_budget_check(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["permanent_band"], json!("sweet_spot"), "report: {out}");
         assert_eq!(v["within_budget"], json!(true), "report: {out}");
+    }
+
+    #[test]
+    fn example_dialogue_excluded_from_permanent() {
+        // A large Example Dialogue plus a sweet-spot Personality stays within
+        // budget — Example Dialogue does not count toward the permanent total.
+        let sweet = "This character has a detailed inner world. ".repeat(250);
+        let big_example = "word ".repeat(3000); // ~3750 tokens, excluded
+        let text = format!(
+            "# Personality
+{sweet}
+
+---
+
+# Opening Messages
+Hello there.
+
+---
+
+# Example Dialogue
+{big_example}"
+        );
+        let input = json!({ "card": text });
+        let out = token_budget_check(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v["per_section_tokens"]["example_messages"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(v["within_budget"], json!(true), "report: {out}");
+    }
+
+    #[test]
+    fn description_folds_into_personality() {
+        // A card whose ONLY permanent box is `# Description` still validates:
+        // Description folds into Personality.
+        let text = "# Description
+{{char}} is a stoic ex-soldier who rarely speaks about the past.
+
+---
+
+# Opening Messages
+{{char}} nods once, saying nothing.";
+        let input = json!({ "card": text });
+        let out = validate_card(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["valid"], json!(true), "report: {out}");
+        assert!(v["sections_present"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s == "personality"));
+    }
+
+    #[test]
+    fn description_tokens_count_as_personality() {
+        // The Description body's tokens land in per_section_tokens.personality
+        // and count toward the permanent total.
+        let desc = "This character has a detailed inner world. ".repeat(250);
+        let text = format!(
+            "# Description
+{desc}
+
+---
+
+# Opening Messages
+Hi."
+        );
+        let out = token_budget_check(&json!({ "card": text })).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let ptok = v["per_section_tokens"]["personality"].as_u64().unwrap();
+        assert!(
+            ptok > 2000,
+            "description should count as personality: {out}"
+        );
+        assert_eq!(v["permanent_tokens"].as_u64().unwrap(), ptok);
     }
 
     #[test]
@@ -982,12 +1212,7 @@ hi"
 
     #[test]
     fn parse_sections_smoke_test() {
-        let text = "# Name
-Aria
-
----
-
-# Personality
+        let text = "# Personality
 Smart.
 
 ---
@@ -995,20 +1220,14 @@ Smart.
 # Opening Messages
 Hi!";
         let sections = parse_sections(text);
-        assert_eq!(sections.len(), 3);
-        assert_eq!(sections[0].slug, "name");
-        assert_eq!(sections[1].slug, "personality");
-        assert_eq!(sections[2].slug, "opening_messages");
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].slug, "personality");
+        assert_eq!(sections[1].slug, "opening_messages");
     }
 
     #[test]
     fn direct_string_input_works() {
-        let text = "# Name
-X
-
----
-
-# Personality
+        let text = "# Personality
 p
 
 ---
@@ -1022,9 +1241,9 @@ hi";
 
     #[test]
     fn structured_object_card_validates() {
-        // The shape the tool schema advertises (and the shape the model first
-        // reached for in practice): a JSON object under `card`, using the
-        // SillyTavern field names first_mes / mes_example.
+        // The shape the tool schema advertises: a JSON object under `card`,
+        // using the SillyTavern field names. `name` is ignored; `description`
+        // folds into personality.
         let input = json!({
             "card": {
                 "name": "Akira",
@@ -1039,11 +1258,16 @@ hi";
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["valid"], json!(true), "report: {out}");
         assert_eq!(v["errors"].as_array().unwrap().len(), 0);
+        assert!(v["sections_present"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s == "personality"));
     }
 
     #[test]
     fn structured_fields_at_top_level_validate() {
-        // Same fields without the `card` wrapper.
+        // Same fields without the `card` wrapper. `name` is ignored.
         let input = json!({
             "name": "Akira",
             "personality": "{{char}} keeps everyone at arm's length.",
@@ -1078,9 +1302,7 @@ hi";
     #[test]
     fn colon_style_headers_parse_and_validate() {
         // The model sometimes reaches for `Label:` instead of `# Label`.
-        let text = "Name: Aria
-
-Personality:
+        let text = "Personality:
 {{char}} is warm and witty and speaks with a gentle cadence.
 
 Opening Messages:
@@ -1093,10 +1315,7 @@ Hi {{user}}, fancy seeing you here!";
 
     #[test]
     fn bold_headers_parse_and_validate() {
-        let text = "**Name**
-Kai
-
-**Personality**
+        let text = "**Personality**
 {{char}} is a quiet observer who speaks in short sentences.
 
 **Opening Messages**
@@ -1110,10 +1329,7 @@ The stars are out tonight.";
     fn synonym_colon_header_maps_to_canonical_section() {
         // `first_mes:` must be recognised as the Opening Messages section, not
         // an unrecognised section.
-        let text = "# Name
-Akira
-
-# Personality
+        let text = "# Personality
 {{char}} keeps everyone at arm's length.
 
 first_mes:
@@ -1133,10 +1349,7 @@ first_mes:
     fn prose_colon_lines_are_not_headers() {
         // Lines like `{{char}}: ...` use unknown labels and must stay body text,
         // not split the section.
-        let text = "# Name
-Aria
-
-# Personality
+        let text = "# Personality
 {{char}} is warm.
 
 # Opening Messages
@@ -1152,14 +1365,9 @@ Aria
 
     #[test]
     fn validate_card_strict_errors_on_invalid() {
-        // Missing required Name section.
+        // Missing required Opening Messages section => invalid under new rules.
         let text = "# Personality
-p
-
----
-
-# Opening Messages
-hi";
+p";
         let err = validate_card_strict(&json!({ "card": text })).unwrap_err();
         assert!(err.contains("INVALID"), "got: {err}");
         // The full report is still attached for the model to act on.
@@ -1175,12 +1383,9 @@ hi";
 
     #[test]
     fn token_budget_zero_personality_explains_not_found() {
-        // Misspelled header → personality parsed as 0 tokens. The flag should
+        // Misspelled header => personality parsed as 0 tokens. The flag should
         // explain "not found", not just call it low quality.
-        let text = "# Name
-X
-
-# Persanality
+        let text = "# Persanality
 {{char}} is warm.
 
 # Opening Messages
@@ -1210,12 +1415,7 @@ hi";
 
     #[test]
     fn opening_messages_count_matches() {
-        let text = "# Name
-A
-
----
-
-# Personality
+        let text = "# Personality
 B
 
 ---
@@ -1238,48 +1438,9 @@ Three.";
     }
 
     #[test]
-    fn description_excluded_from_permanent_budget() {
-        let desc = "word ".repeat(2000); // ~2000 chars, ~500 tokens
-                                         // Personality needs to be >1000 tokens to avoid low-quality flag
-        let med = "X is a friendly character with a warm personality and a great sense of humor. "
-            .repeat(60);
-        let text = format!(
-            "# Name
-X
-
----
-
-# Description
-{desc}
-
----
-
-# Personality
-{med}
-
----
-
-# Opening Messages
-Hello."
-        );
-        let out = token_budget_check(&json!({ "card": text })).unwrap();
-        let v: Value = serde_json::from_str(&out).unwrap();
-        // Permanent should still pass since description isn't counted
-        assert_eq!(v["within_budget"], json!(true));
-        // But description tokens should be reported
-        let desc_tokens = v["per_section_tokens"]["description"].as_u64().unwrap_or(0);
-        assert!(desc_tokens > 0, "description should have token count");
-    }
-
-    #[test]
     fn scenario_and_example_messages_optional() {
-        // No Scenario or Example Messages — should only warn, not error
-        let text = "# Name
-X
-
----
-
-# Personality
+        // No Scenario or Example Dialogue — should only warn, not error.
+        let text = "# Personality
 p
 
 ---
@@ -1290,8 +1451,16 @@ hi";
         let out = validate_card(&input).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["valid"], json!(true));
-        // Should warn about missing scenario, example messages, description
-        assert!(!v["warnings"].as_array().unwrap().is_empty());
+        // Should warn about missing scenario and example dialogue.
+        let warnings = v["warnings"].as_array().unwrap();
+        assert!(!warnings.is_empty());
+        // The stale Description warning must be gone.
+        assert!(
+            !warnings
+                .iter()
+                .any(|w| w.as_str().unwrap().contains("Description")),
+            "no Description warning expected: {out}"
+        );
     }
 
     #[test]
@@ -1302,20 +1471,43 @@ p
 ---
 
 # Opening Messages
-hi
-
----
-
-# Name
-X";
+hi";
         let input = json!({ "card": text });
         let out = validate_card(&input).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["valid"], json!(true));
         let present = v["sections_present"].as_array().unwrap();
-        // Should be sorted alphabetically by slug
-        assert_eq!(present[0], json!("name"));
-        assert_eq!(present[1], json!("opening_messages"));
-        assert_eq!(present[2], json!("personality"));
+        // Sorted alphabetically by slug.
+        assert_eq!(present[0], json!("opening_messages"));
+        assert_eq!(present[1], json!("personality"));
+    }
+
+    #[test]
+    fn merges_description_and_personality() {
+        // Both boxes present => merged into one Personality (tokens summed).
+        let text = "# Description
+Alpha bravo charlie.
+
+---
+
+# Personality
+Delta echo foxtrot.
+
+---
+
+# Opening Messages
+hi";
+        let sections = parse_sections(text);
+        let personality: Vec<_> = sections
+            .iter()
+            .filter(|s| s.slug == "personality")
+            .collect();
+        assert_eq!(
+            personality.len(),
+            1,
+            "should merge to one personality section"
+        );
+        assert!(personality[0].body.contains("Alpha"));
+        assert!(personality[0].body.contains("Delta"));
     }
 }

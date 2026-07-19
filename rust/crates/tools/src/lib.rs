@@ -1372,7 +1372,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "validate_card",
-            description: "Validate a Janitor AI character card against the card schema. Pass the card either as a JSON object under `card` (fields: name, description, personality, scenario, first_mes, mes_example, tags) or as a Markdown string under `card` with `# Name` / `# Personality` / `# Opening Messages` sections separated by `---`. Returns a JSON report with `valid`, `errors`, `warnings`.",
+            description: "Validate a Janitor AI character card against the four-box card schema (Scenario, Personality, Opening Messages, Example Dialogue). Pass the card either as a JSON object under `card` (fields: personality (a.k.a. description), scenario, first_mes, mes_example; `name`/`description` are accepted but `name` is ignored and `description` folds into personality) or as a Markdown string under `card` with `# Scenario` / `# Personality` / `# Opening Messages` / `# Example Dialogue` sections separated by `---`. Required: Personality and Opening Messages. Returns a JSON report with `valid`, `errors`, `warnings`.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1404,7 +1404,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "token_budget_check",
-            description: "Estimate the token size of a Janitor card's fields and flag when the personality or permanent (always-in-context) definition exceeds Janitor's practical budget. Pass the card as a JSON object under `card`. Returns per-field token estimates, the permanent total, and `flags`.",
+            description: "Estimate the token size of a Janitor card's fields and flag when the permanent (always-in-context) definition = Scenario + Personality falls outside the healthy band. Reports the five bands (under_specified <2k, sweet_spot 2k-3k, lorepacked_range 3k-6k, approaching_bloat 6k-7k, bloated 7k+); only the sweet spot is clean. Example Dialogue and Opening Messages are reported but excluded from the permanent total. Pass the card as a JSON object under `card`. Returns per-field token estimates, the permanent total, its band, and `flags`.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
