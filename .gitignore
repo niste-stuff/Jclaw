@@ -28,3 +28,5 @@ docs/superpowers/plans/
 # Superpowers subagent-driven-development scratch
 .worktrees/
 .superpowers/
+# Local run-continuation scratch state
+.omo/run-continuation/
