@@ -144,6 +144,12 @@ impl PartialEq for Session {
             && self.workspace_root == other.workspace_root
             && self.prompt_history == other.prompt_history
             && self.last_health_check_ms == other.last_health_check_ms
+            // `model` is persisted by `to_json`/`meta_record` and read back by
+            // `from_json`/`from_jsonl`, so it must participate in equality or a
+            // save/load round-trip of a session with a model would compare
+            // unequal. Session eq is only used for round-trip assertions (not
+            // dedup), so including it is safe.
+            && self.model == other.model
     }
 }
 
@@ -278,6 +284,11 @@ impl Session {
 
     pub fn push_message(&mut self, message: ConversationMessage) -> Result<(), SessionError> {
         self.touch();
+        // The message must be in `self.messages` *before* persisting: the
+        // bootstrap branch of `append_persisted_message` renders a full
+        // snapshot from `self.messages`, so a persist-first reorder would drop
+        // the new message from the first-write snapshot. We therefore push
+        // first, then persist.
         self.messages.push(message);
         let persist_result = {
             let message_ref = self.messages.last().ok_or_else(|| {
@@ -285,11 +296,14 @@ impl Session {
             })?;
             self.append_persisted_message(message_ref)
         };
-        if let Err(error) = persist_result {
-            self.messages.pop();
-            return Err(error);
-        }
-        Ok(())
+        // On a persist error we intentionally keep the message in memory rather
+        // than popping it. The append/bootstrap write may have partially or
+        // fully landed on disk before failing; popping would silently diverge
+        // in-memory state from the persisted JSONL. Keeping it means a later
+        // successful save reconciles both to the same content. Callers already
+        // abort the turn on Err, so leaving the message in memory does not
+        // change caller-visible behavior.
+        persist_result
     }
 
     pub fn push_user_text(&mut self, text: impl Into<String>) -> Result<(), SessionError> {
@@ -310,6 +324,11 @@ impl Session {
     ) -> SessionHeartbeat {
         let liveness = match (transport_alive, self.last_health_check_ms) {
             (false, _) => SessionLiveness::TransportDead,
+            // Clock rewind: `now_ms < last` means the wall clock moved backwards
+            // since the last health check. `saturating_sub` would floor this to
+            // 0 and falsely report Healthy, masking a possibly stalled session.
+            // Treat a rewind as Unknown rather than trusting the stale reading.
+            (true, Some(last)) if now_ms < last => SessionLiveness::Unknown,
             (true, Some(last)) if now_ms.saturating_sub(last) <= stalled_after_ms => {
                 SessionLiveness::Healthy
             }
@@ -1962,6 +1981,17 @@ mod session_heartbeat_tests {
         assert_eq!(
             session.heartbeat_at(1_000, 500, false).liveness,
             SessionLiveness::TransportDead
+        );
+    }
+
+    #[test]
+    fn session_heartbeat_treats_clock_rewind_as_unknown_not_healthy() {
+        let mut session = Session::new();
+        session.record_health_check(2_000);
+        // now < last: the wall clock moved backwards. Must not be Healthy.
+        assert_eq!(
+            session.heartbeat_at(1_000, 500, true).liveness,
+            SessionLiveness::Unknown
         );
     }
 }

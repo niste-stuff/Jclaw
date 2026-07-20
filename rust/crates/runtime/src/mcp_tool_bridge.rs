@@ -204,7 +204,16 @@ impl McpToolRegistry {
 
                         match (response, shutdown) {
                             (Ok(response), Ok(())) => Ok(response),
-                            (Err(error), Ok(())) | (Err(error), Err(_)) => Err(error),
+                            (Err(error), Ok(())) => Err(error),
+                            (Err(error), Err(shutdown_error)) => {
+                                // The tool call error is the one surfaced to the
+                                // caller, but don't silently lose the shutdown
+                                // failure — it can indicate a leaked child process.
+                                eprintln!(
+                                    "warning: MCP server shutdown failed after tool call error: {shutdown_error}"
+                                );
+                                Err(error)
+                            }
                             (Ok(_), Err(error)) => Err(error),
                         }
                     }?;

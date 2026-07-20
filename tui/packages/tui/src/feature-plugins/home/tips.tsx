@@ -6,7 +6,7 @@ import { useBindings } from "../../keymap"
 
 const id = "internal:home-tips"
 
-function View(props: { api: TuiPluginApi; hidden: boolean; show: boolean; connected: boolean }) {
+function View(props: { api: TuiPluginApi; hidden: boolean; show: boolean }) {
   useBindings(() => ({
     commands: [
       {
@@ -27,7 +27,7 @@ function View(props: { api: TuiPluginApi; hidden: boolean; show: boolean; connec
   return (
     <box width="100%" maxWidth={75} alignItems="center" paddingTop={3} flexShrink={1}>
       <Show when={props.show}>
-        <Tips api={props.api} connected={props.connected} />
+        <Tips api={props.api} />
       </Show>
     </box>
   )
@@ -46,7 +46,7 @@ const tui: TuiPlugin = async (api) => {
           ),
         )
         const show = createMemo(() => (!first() || !connected()) && !hidden())
-        return <View api={api} hidden={hidden()} show={show()} connected={connected()} />
+        return <View api={api} hidden={hidden()} show={show()} />
       },
     },
   })

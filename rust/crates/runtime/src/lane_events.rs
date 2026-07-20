@@ -456,7 +456,11 @@ pub fn compute_event_fingerprint(
         "status": status,
         "data": data,
     });
-    let canonical = serde_json::to_vec(&payload).unwrap_or_default();
+    // Serializing a value we just built from `serde_json::json!` cannot fail in
+    // practice, but fall back to a stable, input-derived byte string rather than
+    // an empty vec so distinct inputs can never collide to the same digest.
+    let canonical = serde_json::to_vec(&payload)
+        .unwrap_or_else(|_| format!("{event:?}|{status:?}|{data:?}").into_bytes());
     let digest = Sha256::digest(canonical);
     let mut fingerprint = String::with_capacity(16);
     for byte in &digest[..8] {
@@ -783,9 +787,8 @@ pub fn dedupe_superseded_commit_events(events: &[LaneEvent]) -> Vec<LaneEvent> {
 
     events
         .iter()
-        .cloned()
         .zip(keep)
-        .filter_map(|(event, retain)| retain.then_some(event))
+        .filter_map(|(event, retain)| retain.then(|| event.clone()))
         .collect()
 }
 

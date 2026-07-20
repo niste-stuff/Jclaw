@@ -376,7 +376,6 @@ impl OpenAiCompatClient {
 /// the system clock resolution is coarser than consecutive retry sleeps.
 static JITTER_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Returns a random additive jitter in `[0, base]` to decorrelate retries
 /// Deserialize a JSON field as a `Vec<T>`, treating an explicit `null` value
 /// the same as a missing field (i.e. as an empty vector).
 /// Some OpenAI-compatible providers emit `"tool_calls": null` instead of
@@ -390,6 +389,7 @@ where
     Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
+/// Returns a random additive jitter in `[0, base]` to decorrelate retries
 /// from multiple concurrent clients. Entropy is drawn from the nanosecond
 /// wall clock mixed with a monotonic counter and run through a splitmix64
 /// finalizer; adequate for retry jitter (no cryptographic requirement).
@@ -774,7 +774,7 @@ impl ToolCallState {
         if self.emitted_len >= self.arguments.len() {
             return None;
         }
-        let delta = self.arguments[self.emitted_len..].to_string();
+        let delta = self.arguments[self.emitted_len..].to_owned();
         self.emitted_len = self.arguments.len();
         Some(ContentBlockDeltaEvent {
             index: self.block_index(offset),
@@ -929,9 +929,6 @@ struct ErrorBody {
     message: Option<String>,
 }
 
-/// Returns true for models known to reject tuning parameters like temperature,
-/// `top_p`, `frequency_penalty`, and `presence_penalty`. These are typically
-/// reasoning/chain-of-thought models with fixed sampling.
 /// Returns true for models known to reject tuning parameters like temperature,
 /// `top_p`, `frequency_penalty`, and `presence_penalty`. These are typically
 /// reasoning/chain-of-thought models with fixed sampling.
@@ -1204,8 +1201,6 @@ fn is_protected_extra_body_key(key: &str) -> bool {
 
 /// Returns true for models that do NOT support the `is_error` field in tool results.
 /// kimi models (via Moonshot AI/Dashscope) reject this field with 400 Bad Request.
-/// Returns true for models that do NOT support the `is_error` field in tool results.
-/// kimi models (via Moonshot AI/Dashscope) reject this field with 400 Bad Request.
 /// Public for benchmarking and testing purposes.
 #[must_use]
 pub fn model_rejects_is_error_field(model: &str) -> bool {
@@ -1309,9 +1304,8 @@ pub fn translate_message(message: &InputMessage, model: &str) -> Vec<Value> {
 /// `tool_calls` array containing an entry whose `id` matches the tool
 /// message's `tool_call_id`, the pair is valid and both are kept. Otherwise
 /// the tool message is dropped.
-/// Remove `role:"tool"` messages from `messages` that have no valid paired
-/// `role:"assistant"` message with a matching `tool_calls[].id` immediately
-/// preceding them. Public for benchmarking purposes.
+///
+/// Public for benchmarking purposes.
 pub fn sanitize_tool_message_pairing(messages: Vec<Value>) -> Vec<Value> {
     // Collect indices of tool messages that are orphaned.
     let mut drop_indices = std::collections::HashSet::new();

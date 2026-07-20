@@ -138,7 +138,6 @@ export const CardBudgetTool = Tool.define(
           within_budget: withinBudget,
           encoding: params.encoding,
           per_field_tokens: perField,
-          ...(permanentTokens !== undefined ? { permanent_tokens: permanentTokens } : {}),
           flags,
         }
 

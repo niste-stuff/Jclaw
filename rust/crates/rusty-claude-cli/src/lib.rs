@@ -2796,11 +2796,12 @@ fn format_unknown_option(option: &str) -> String {
     message
 }
 
-fn format_unknown_direct_slash_command(name: &str) -> String {
-    // #827: prefix with classifier-friendly token so classify_error_kind
-    // returns "unknown_slash_command" instead of the opaque fallback.
-    let mut message =
-        format!("unknown_slash_command: unknown slash command outside the REPL: /{name}");
+/// Shared builder for the two unknown-slash-command messages. Both start with
+/// the classifier-friendly `unknown_slash_command:` token (#827) and append the
+/// same "Did you mean" suggestion line plus OMC compatibility note; they differ
+/// only in the header text and the trailing help hint, so those are passed in.
+fn build_unknown_slash_command_message(header: String, name: &str, trailer: &str) -> String {
+    let mut message = header;
     if let Some(suggestions) = render_suggestion_line("Did you mean", &suggest_slash_commands(name))
     {
         message.push('\n');
@@ -2810,25 +2811,28 @@ fn format_unknown_direct_slash_command(name: &str) -> String {
         message.push('\n');
         message.push_str(note);
     }
-    message.push_str("\nRun `claw --help` for CLI usage, or start `claw` and use /help.");
+    message.push_str(trailer);
     message
+}
+
+fn format_unknown_direct_slash_command(name: &str) -> String {
+    // #827: prefix with classifier-friendly token so classify_error_kind
+    // returns "unknown_slash_command" instead of the opaque fallback.
+    build_unknown_slash_command_message(
+        format!("unknown_slash_command: unknown slash command outside the REPL: /{name}"),
+        name,
+        "\nRun `claw --help` for CLI usage, or start `claw` and use /help.",
+    )
 }
 
 fn format_unknown_slash_command(name: &str) -> String {
     // #827: prefix with classifier-friendly token so classify_error_kind
     // can return "unknown_slash_command" instead of the opaque fallback.
-    let mut message = format!("unknown_slash_command: Unknown slash command: /{name}");
-    if let Some(suggestions) = render_suggestion_line("Did you mean", &suggest_slash_commands(name))
-    {
-        message.push('\n');
-        message.push_str(&suggestions);
-    }
-    if let Some(note) = omc_compatibility_note_for_unknown_slash_command(name) {
-        message.push('\n');
-        message.push_str(note);
-    }
-    message.push_str("\n  Help             /help lists available slash commands");
-    message
+    build_unknown_slash_command_message(
+        format!("unknown_slash_command: Unknown slash command: /{name}"),
+        name,
+        "\n  Help             /help lists available slash commands",
+    )
 }
 
 fn omc_compatibility_note_for_unknown_slash_command(name: &str) -> Option<&'static str> {
@@ -3163,7 +3167,13 @@ fn permission_mode_from_label(mode: &str) -> PermissionMode {
         "read-only" => PermissionMode::ReadOnly,
         "workspace-write" => PermissionMode::WorkspaceWrite,
         "danger-full-access" => PermissionMode::DangerFullAccess,
-        other => panic!("unsupported permission mode label: {other}"),
+        // Callers only reach here with values already vetted by
+        // `normalize_permission_mode`, so any other label is a programmer error.
+        // Fall back to the safest enforcement level instead of panicking.
+        other => {
+            debug_assert!(false, "unsupported permission mode label: {other}");
+            PermissionMode::ReadOnly
+        }
     }
 }
 
@@ -3363,9 +3373,9 @@ fn print_model_validation_warning_status(
         allowed_tools,
         Some(&format_selection),
     );
-    let object = value
-        .as_object_mut()
-        .expect("status_json_value should render an object");
+    let object = value.as_object_mut().ok_or_else(|| {
+        Box::<dyn std::error::Error>::from("status_json_value did not render a JSON object")
+    })?;
     object.insert("status".to_string(), serde_json::json!("warn"));
     object.insert("error_kind".to_string(), serde_json::json!(kind));
     object.insert(
@@ -4066,7 +4076,7 @@ fn render_doctor_report(
     let branch_freshness = BranchFreshness::from_git_status(project_context.git_status.as_deref());
     let stale_base_state = stale_base_state_for(&cwd, None);
     let empty_config = runtime::RuntimeConfig::empty();
-    let sandbox_config = config.as_ref().ok().unwrap_or(&empty_config);
+    let sandbox_config = config.as_ref().unwrap_or(&empty_config);
     let boot_preflight = build_boot_preflight_snapshot(
         &cwd,
         project_root.as_deref(),
@@ -8516,6 +8526,13 @@ impl LiveCli {
     fn print_status(&self) {
         let cumulative = self.runtime.usage().cumulative_usage();
         let latest = self.runtime.usage().current_turn_usage();
+        let context = match status_context(Some(&self.session.path)) {
+            Ok(context) => context,
+            Err(error) => {
+                eprintln!("warning: failed to load status context: {error}");
+                return;
+            }
+        };
         println!(
             "{}",
             format_status_report(
@@ -8528,7 +8545,7 @@ impl LiveCli {
                     estimated_tokens: self.runtime.estimated_tokens(),
                 },
                 self.permission_mode.as_str(),
-                &status_context(Some(&self.session.path)).expect("status context should load"),
+                &context,
                 None, // #148: REPL /status doesn't carry flag provenance
                 None,
             )
@@ -8586,7 +8603,13 @@ impl LiveCli {
     }
 
     fn print_sandbox_status() {
-        let cwd = env::current_dir().expect("current dir");
+        let cwd = match env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                eprintln!("warning: failed to resolve current directory: {error}");
+                return;
+            }
+        };
         let loader = ConfigLoader::default_for(&cwd);
         let runtime_config = loader
             .load()

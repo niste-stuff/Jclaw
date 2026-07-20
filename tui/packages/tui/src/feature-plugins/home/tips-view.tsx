@@ -36,7 +36,7 @@ function parse(text: string): TextPart[] {
 // time the component mounts (i.e. once per launch). Add your own lines in
 // ./splash-texts.ts. `props` is kept for interface compatibility with the
 // home-tips slot but is no longer used.
-export function Tips(props: { api: TuiPluginApi; connected?: boolean }) {
+export function Tips(props: { api: TuiPluginApi }) {
   void props
   const theme = useTheme().theme
   const pool = SPLASH_TEXTS.length ? SPLASH_TEXTS : [FALLBACK]

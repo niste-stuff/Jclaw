@@ -1011,7 +1011,13 @@ impl McpServerManager {
         };
 
         if let Some(process) = process.as_mut() {
-            let _ = process.shutdown().await;
+            // Shutdown failures during a reset are non-fatal (we still drop the
+            // process below), but surface them so a stuck child isn't silent.
+            if let Err(shutdown_error) = process.shutdown().await {
+                eprintln!(
+                    "warning: MCP server {server_name} shutdown failed during reset: {shutdown_error}"
+                );
+            }
         }
 
         Ok(())

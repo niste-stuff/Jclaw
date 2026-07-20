@@ -341,11 +341,13 @@ impl SessionStore {
             if let Ok(entries) = fs::read_dir(&local_parent) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_dir() && path != self.sessions_root {
-                        let _ = Self::collect_sessions_from_dir_unvalidated(&path, &mut sessions);
-                    } else if path == self.sessions_root {
-                        // Already searched in list_sessions(), but include here
-                        // in case this is called standalone
+                    // Collect from every fingerprint subdir, including
+                    // self.sessions_root: list_sessions() already searches that
+                    // one, but scan_global_sessions() may be called standalone,
+                    // so we include it here too. (The previous `else if` branch
+                    // that special-cased self.sessions_root was dead: it ran the
+                    // identical collect call as the `if`.)
+                    if path.is_dir() {
                         let _ = Self::collect_sessions_from_dir_unvalidated(&path, &mut sessions);
                     }
                 }
@@ -406,7 +408,14 @@ impl SessionStore {
                 parse_created_at_ms_from_session_id(&fallback_id).unwrap_or(0);
             let summary = match Session::load_from_path(&path) {
                 Ok(session) => {
-                    if self.validate_loaded_session(&path, &session).is_err() {
+                    if let Err(err) = self.validate_loaded_session(&path, &session) {
+                        // Skip sessions that fail workspace validation, but log
+                        // so the skip is observable rather than an invisible
+                        // disk orphan. Skip behavior itself is unchanged.
+                        eprintln!(
+                            "  Note: skipping session {} (failed validation: {err})",
+                            path.display()
+                        );
                         continue;
                     }
                     ManagedSessionSummary {

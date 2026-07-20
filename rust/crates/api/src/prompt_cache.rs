@@ -440,8 +440,20 @@ fn request_hash_hex(request: &MessageRequest) -> String {
 }
 
 fn hash_serializable<T: Serialize>(value: &T) -> u64 {
-    let json = serde_json::to_vec(value).unwrap_or_default();
-    stable_hash_bytes(&json)
+    match serde_json::to_vec(value) {
+        Ok(json) => stable_hash_bytes(&json),
+        // On serialization failure, fall back to hashing the error text behind a
+        // distinct sentinel prefix. This keeps distinct-but-unserializable inputs
+        // from all collapsing to the same hash (and from aliasing a value that
+        // legitimately serializes to empty bytes), so a failure can never produce
+        // a false cache-key match.
+        Err(error) => {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(b"prompt-cache:serialize-error:");
+            bytes.extend_from_slice(error.to_string().as_bytes());
+            stable_hash_bytes(&bytes)
+        }
+    }
 }
 
 fn sanitize_path_segment(value: &str) -> String {

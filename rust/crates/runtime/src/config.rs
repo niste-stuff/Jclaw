@@ -1101,9 +1101,11 @@ impl RuntimeFeatureConfig {
 }
 
 fn merge_trusted_roots(config_roots: &[String], per_call_roots: &[String]) -> Vec<String> {
-    let mut merged = Vec::with_capacity(config_roots.len() + per_call_roots.len());
+    let capacity = config_roots.len() + per_call_roots.len();
+    let mut merged = Vec::with_capacity(capacity);
+    let mut seen = std::collections::HashSet::with_capacity(capacity);
     for root in config_roots.iter().chain(per_call_roots.iter()) {
-        if !merged.contains(root) {
+        if seen.insert(root.as_str()) {
             merged.push(root.clone());
         }
     }

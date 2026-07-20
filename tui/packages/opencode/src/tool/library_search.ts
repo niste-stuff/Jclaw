@@ -1,4 +1,10 @@
 import path from "path"
+import { readFile } from "node:fs/promises"
+import { Effect, Schema } from "effect"
+import * as Tool from "./tool"
+import { Global } from "@opencode-ai/core/global"
+import { Glob } from "@opencode-ai/core/util/glob"
+import DESCRIPTION from "./library_search.txt"
 import { normalizeForMatch } from "./match-util"
 
 export { normalizeForMatch }
@@ -88,13 +94,6 @@ export function searchContent(
       snippet: buildSnippet(file.content, query),
     }))
 }
-
-import { readFile } from "node:fs/promises"
-import { Effect, Schema } from "effect"
-import * as Tool from "./tool"
-import { Global } from "@opencode-ai/core/global"
-import { Glob } from "@opencode-ai/core/util/glob"
-import DESCRIPTION from "./library_search.txt"
 
 export const Parameters = Schema.Struct({
   query: Schema.String.annotate({
